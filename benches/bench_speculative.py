@@ -2,8 +2,8 @@
 tokens per step for the target to verify. It pays only when the draft is accepted often and
 costs much less than the target, and a self-draft cannot be both.
 
-    uv run python benches/bench_speculative.py --metal
-    uv run python benches/bench_speculative.py --metal --model Qwen/Qwen3-1.7B --draft-model Qwen/Qwen3-0.6B
+    uv run python benches/bench_speculative.py --cuda
+    uv run python benches/bench_speculative.py --cuda --model Qwen/Qwen3-1.7B --draft-model Qwen/Qwen3-0.6B
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import time
 
 from bench_quantize import PROMPTS
 from matplotlib.figure import Figure
-from utils import engine, evidence, load_mlx_lm, save_plot
+from utils import engine, evidence, load_hf, save_plot
 
 from mini_vllm import DEFAULT_MODEL
 
@@ -21,7 +21,7 @@ from mini_vllm import DEFAULT_MODEL
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--metal", action="store_true", help="run on the Metal kernels in src/extensions/")
+    parser.add_argument("--cuda", action="store_true", help="run on the CUDA kernels in src/extensions/")
     parser.add_argument("--draft-model", help="a separate, smaller checkpoint sharing the tokenizer")
     parser.add_argument("--draft-layers", type=int, nargs="+", default=[4, 14, 28],
                         help="self-draft depths: the target's first N layers")
@@ -30,24 +30,25 @@ def main() -> None:
     args = parser.parse_args()
 
     title = (f"Speculative decoding: k={args.k}, {len(PROMPTS)} greedy requests of "
-             f"{args.max_tokens} tokens, one at a time, {'metal' if args.metal else 'pure'}")
+             f"{args.max_tokens} tokens, one at a time, {'cuda' if args.cuda else 'pure'}")
     with evidence(title):
-        mlx_model, tokenizer = load_mlx_lm(args.model)
-        layers = mlx_model.args.num_hidden_layers
+        hf_model, tokenizer = load_hf(args.model)
+        layers = hf_model.config.num_hidden_layers
         drafts = [("none", {})]
         for n in args.draft_layers:
             drafts.append((f"first {n} of {layers} layers", {"num_speculative_tokens": args.k,
                                                              "num_draft_layers": n}))
         if args.draft_model:
+            # 256 blocks is about 450 MB of KV for either model, which fits beside the pair on 8 GB.
             drafts.append((args.draft_model, {"num_speculative_tokens": args.k,
-                                              "draft_model": args.draft_model}))
+                                              "draft_model": args.draft_model, "draft_blocks": 256}))
 
         print("| draft | acceptance | tokens per target pass | seconds | identical to no draft |")
         print("|---|---|---|---|---|")
         baseline = None
         labels, seconds_by_draft, tokens_per_pass = [], [], []
         for label, config in drafts:
-            llm = engine(mlx_model, tokenizer, args.metal, num_blocks=256, **config)
+            llm = engine(hf_model, tokenizer, args.cuda, num_blocks=256, **config)
             if llm.spec is not None:
                 llm.spec.stats.__init__()  # forget the warm-up
             start = time.perf_counter()

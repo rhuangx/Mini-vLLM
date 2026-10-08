@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import mlx.core as mx
+import torch
 
 if TYPE_CHECKING:
     from mini_vllm.paged_kv_cache import BlockManager
@@ -24,15 +24,18 @@ class ForwardBatch:
     [0, 300, 301, 302], and context_lens [300, 512, 47]. Flattened rather than padded,
     in the paged kernel's own layout."""
 
-    input_ids: mx.array     # int32 [T]
-    positions: mx.array     # int32 [T], each sequence's own RoPE positions
-    cu_seqlens_q: mx.array  # int32 [N + 1], where each sequence's tokens start
-    context_lens: mx.array  # int32 [N], S: how many tokens each sequence attends over
-    slot_mapping: mx.array  # int32 [T], the pool slot each token's K/V is written to
-    block_tables: mx.array  # int32 [N, max_blocks], padded with PADDING_BLOCK
+    input_ids: torch.Tensor     # int32 [T]
+    positions: torch.Tensor     # int32 [T], each sequence's own RoPE positions
+    cu_seqlens_q: torch.Tensor  # int32 [N + 1], where each sequence's tokens start
+    context_lens: torch.Tensor  # int32 [N], S: how many tokens each sequence attends over
+    slot_mapping: torch.Tensor  # int32 [T], the pool slot each token's K/V is written to
+    block_tables: torch.Tensor  # int32 [N, max_blocks], padded with PADDING_BLOCK
+    # The lists those tensors were built from: (tables, query starts, context lengths).
+    # Attention reads them instead of calling .tolist() on the device tensors.
+    host: tuple[list[list[int]], list[int], list[int]]
 
     @property
-    def last_rows(self) -> mx.array:
+    def last_rows(self) -> torch.Tensor:
         """Each sequence's last token row: the one whose logits are sampled."""
         return self.cu_seqlens_q[1:] - 1
 
@@ -55,11 +58,17 @@ class ForwardBatch:
 
         width = max(len(table) for table in tables)
         padded = [table + [PADDING_BLOCK] * (width - len(table)) for table in tables]
+        device = manager.kv.keys[0].device
+
+        def ints(values) -> torch.Tensor:
+            return torch.tensor(values, dtype=torch.int32, device=device)
+
         return cls(
-            input_ids=mx.array(input_ids, dtype=mx.int32),
-            positions=mx.array(positions, dtype=mx.int32),
-            cu_seqlens_q=mx.array(offsets, dtype=mx.int32),
-            context_lens=mx.array(context_lens, dtype=mx.int32),
-            slot_mapping=mx.array(slots, dtype=mx.int32),
-            block_tables=mx.array(padded, dtype=mx.int32),
+            input_ids=ints(input_ids),
+            positions=ints(positions),
+            cu_seqlens_q=ints(offsets),
+            context_lens=ints(context_lens),
+            slot_mapping=ints(slots),
+            block_tables=ints(padded),
+            host=(padded, offsets, context_lens),
         )

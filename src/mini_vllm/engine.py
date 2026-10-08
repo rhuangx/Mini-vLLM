@@ -7,7 +7,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-import mlx.core as mx
+import torch
 
 from mini_vllm.batch import ForwardBatch
 from mini_vllm.generate import GREEDY
@@ -45,7 +45,7 @@ class EngineConfig:
     num_draft_layers: int | None = None   # None: a self-draft of the target's first N layers
     draft_blocks: int | None = None       # None: the target's pool plus room for k per request
 
-    seed: int | None = None  # seeds MLX's global RNG; greedy decoding is deterministic anyway
+    seed: int | None = None  # seeds torch's global RNG, CUDA included; greedy is deterministic anyway
 
     def scheduler_config(self) -> SchedulerConfig:
         return SchedulerConfig(
@@ -60,13 +60,12 @@ class EngineConfig:
 def blocks_that_fit(model: Qwen3Model, config: EngineConfig) -> int:
     """How many pages fit in kv_fraction of the memory left once the weights are in.
 
-    Unified memory has no free-versus-total split, so "left" is MLX's recommended working
-    set (37.4 GB on a 48 GB M5 Pro) minus what is already active.
+    "Left" is the free device memory torch reports.
     """
     c = model.config
-    element = 1 if config.fp8_kv_cache else model.embedding.weight.dtype.size
+    element = 1 if config.fp8_kv_cache else model.embedding.weight.dtype.itemsize
     per_block = 2 * c.num_hidden_layers * config.block_size * c.num_key_value_heads * c.head_dim * element
-    left = mx.device_info()["max_recommended_working_set_size"] - mx.get_active_memory()
+    left = torch.cuda.mem_get_info()[0]
     return int(left * config.kv_fraction) // per_block
 
 
@@ -117,21 +116,21 @@ class LLM:
             c.num_key_value_heads,
             c.head_dim,
             dtype=model.embedding.weight.dtype,
+            device=model.embedding.weight.device,
             fp8=config.fp8_kv_cache,
         )
-        mx.eval(self.kv.keys, self.kv.values)  # take the whole pool now, not on the first write
         self.manager = BlockManager(self.kv, config.enable_prefix_caching)
         self.scheduler = Scheduler(config.scheduler_config(), self.manager)
         self.spec = self._build_speculation() if config.num_speculative_tokens else None
 
         if config.seed is not None:
-            mx.random.seed(config.seed)
+            torch.manual_seed(config.seed)
 
     def _build_speculation(self) -> SpeculativeDecoder:
         """The draft and the pool of its own it caches in: as many layers as the draft has."""
         config = self.config
         if config.draft_model is not None:
-            draft = load(config.draft_model, self.model.layers[0].attention.use_metal)[0]
+            draft = load(config.draft_model, self.model.layers[0].attention.use_cuda)[0]
         else:
             draft = self_draft(self.model, config.num_draft_layers or self.model.config.num_hidden_layers)
         k = config.num_speculative_tokens
@@ -145,15 +144,15 @@ class LLM:
             dc.num_key_value_heads,
             dc.head_dim,
             dtype=draft.embedding.weight.dtype,
+            device=draft.embedding.weight.device,
             fp8=config.fp8_kv_cache,
         )
-        mx.eval(kv.keys, kv.values)
         return SpeculativeDecoder(DraftProposer(draft, kv, k), self.manager)
 
     @classmethod
-    def from_pretrained(cls, model: str = DEFAULT_MODEL, use_metal: bool = False, **config: Any) -> LLM:
-        """use_metal runs every operator with a kernel on src/extensions/, which must be built."""
-        qwen3, tokenizer = load(model, use_metal)
+    def from_pretrained(cls, model: str = DEFAULT_MODEL, use_cuda: bool = False, **config: Any) -> LLM:
+        """use_cuda runs every operator with a kernel on src/extensions/, which must be built."""
+        qwen3, tokenizer = load(model, use_cuda)
         return cls(qwen3, tokenizer, EngineConfig(**config))
 
     def add_request(
@@ -199,16 +198,11 @@ class LLM:
             start += count
         batch = ForwardBatch.from_scheduled(output.scheduled, self.manager)
         caches = self.kv.caches(batch)
-        logits = self.model(batch.input_ids[None], batch.positions, caches, rows=mx.array(rows))[0]
-        last = logits[mx.array([span.stop - 1 for span in spans])]
-        tokens = sample(last, [request.sampling_params for request in output.requests])
-
-        # The one synchronization per step. The tokens are needed on the host anyway, and
-        # evaluating every layer's pages with them ends this step's graph there: the next
-        # step starts from concrete buffers, and the old pool buffers are released rather
-        # than kept alive by a graph that still reaches back to them.
-        mx.eval(tokens, self.kv.keys, self.kv.values)
-        tokens = tokens.tolist()
+        device = batch.input_ids.device
+        row_index = torch.tensor(rows, dtype=torch.int32, device=device)
+        logits = self.model(batch.input_ids[None], batch.positions, caches, rows=row_index)[0]
+        last = logits[torch.tensor([span.stop - 1 for span in spans], device=device)]
+        tokens = sample(last, [request.sampling_params for request in output.requests]).tolist()
 
         # Read before commit advances them: a request takes a token only once caught up.
         emitting = [
@@ -237,7 +231,7 @@ class LLM:
         return emitted, forked
 
     def _fork_after_prefill(
-        self, output: SchedulerOutput, logits: mx.array
+        self, output: SchedulerOutput, logits: torch.Tensor
     ) -> list[tuple[Request, Request]]:
         """When an n > 1 request finishes its prompt, sample its first-token row n - 1 more
         times and start a branch from each, sharing every prompt page through fork."""
@@ -247,7 +241,7 @@ class LLM:
             done_prompt = leader.num_computed_tokens + count == len(leader.prompt_token_ids)
             if params.n == 1 or leader.output_token_ids or not done_prompt:
                 continue
-            firsts = sample(mx.repeat(logits[row : row + 1], params.n - 1, axis=0), params).tolist()
+            firsts = sample(logits[row : row + 1].repeat_interleave(params.n - 1, dim=0), params).tolist()
             for token in firsts:
                 branch = Request(
                     prompt_token_ids=leader.prompt_token_ids,

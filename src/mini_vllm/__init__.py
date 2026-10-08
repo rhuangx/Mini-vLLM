@@ -1,4 +1,11 @@
-"""Mini-vLLM: a paged-attention LLM inference engine for Apple silicon."""
+"""Mini-vLLM: a paged-attention LLM inference engine for NVIDIA GPUs."""
+
+import os
+
+# Before torch: its Triton matmul overrides need Python headers and are not the
+# cuBLAS numerics this engine is checked against. Force the flag even if torch
+# was imported earlier, then drop any overrides that already registered.
+os.environ["TORCH_DISABLE_NATIVE_JIT"] = "1"
 
 from .attention import *
 from .basics import *

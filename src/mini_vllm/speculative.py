@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-import mlx.core as mx
+import torch
 
 from mini_vllm.batch import ForwardBatch
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
@@ -23,24 +23,24 @@ __all__ = [
 ]
 
 
-def residual_distribution(target: mx.array, draft: mx.array) -> mx.array:
+def residual_distribution(target: torch.Tensor, draft: torch.Tensor) -> torch.Tensor:
     """norm(relu(p - q)): the target's belief minus what the draft already covered.
 
     Its mass before normalizing is 1 - sum(min(p, q)), exactly the shortfall acceptance
     leaves behind, so a rejection drawn from it restores p rather than repairing it.
     """
-    residual = mx.maximum(target - draft, 0.0)
-    return residual / mx.sum(residual)
+    residual = torch.maximum(target - draft, torch.zeros((), device=target.device, dtype=target.dtype))
+    return residual / torch.sum(residual)
 
 
-def _draw(probabilities: mx.array) -> int:
-    """One sample from a 1-D probability vector."""
-    return mx.random.categorical(mx.log(probabilities)).item()
+def _draw(probabilities: torch.Tensor) -> int:
+    """One sample from a 1-D probability vector, from the global generator."""
+    return int(torch.multinomial(probabilities, 1).item())
 
 
 def accept_proposals(
-    target_probs: mx.array,
-    draft_probs: mx.array,
+    target_probs: torch.Tensor,
+    draft_probs: torch.Tensor,
     proposals: list[int],
     greedy: bool = False,
 ) -> tuple[list[int], int]:
@@ -52,19 +52,29 @@ def accept_proposals(
     acceptance take a bonus token from p_{k+1}. Greedy keeps the prefix whose argmaxes agree.
     """
     accepted = []
-    for index, token in enumerate(proposals):
-        target_row, draft_row = target_probs[index], draft_probs[index]
-
-        if greedy:
-            choice = mx.argmax(target_row).item()
+    count = len(proposals)
+    device = target_probs.device
+    if greedy:
+        # One read for every argmax, including the bonus row.
+        choices = torch.argmax(target_probs[: count + 1], dim=-1).tolist()
+        for index, token in enumerate(proposals):
+            choice = choices[index]
             if choice != token:
                 return [*accepted, choice], len(accepted)
             accepted.append(token)
-            continue
+        return [*accepted, choices[count]], len(accepted)
 
+    # The per-proposal ratio and coin, gathered once: the walk below stays on the host.
+    index = torch.arange(count, device=device)
+    proposed = torch.tensor(proposals, dtype=torch.long, device=device)
+    ones = torch.ones(count, device=device)
+    ratio = torch.minimum(target_probs[index, proposed] / draft_probs[index, proposed], ones)
+    coin = torch.rand(count, device=device)
+    ratios, coins = ratio.tolist(), coin.tolist()
+    for step, token in enumerate(proposals):
+        target_row, draft_row = target_probs[step], draft_probs[step]
         # q > 0 for any token the draft drew, so the ratio is finite.
-        ratio = mx.minimum(target_row[token] / draft_row[token], 1.0)
-        if mx.random.uniform().item() < ratio.item():
+        if coins[step] < ratios[step]:
             accepted.append(token)
             continue
 
@@ -72,9 +82,7 @@ def accept_proposals(
         return [*accepted, _draw(residual_distribution(target_row, draft_row))], len(accepted)
 
     # Every proposal survived, so the target's next distribution is already computed.
-    bonus_row = target_probs[len(proposals)]
-    bonus = mx.argmax(bonus_row).item() if greedy else _draw(bonus_row)
-    return [*accepted, bonus], len(accepted)
+    return [*accepted, _draw(target_probs[count])], len(accepted)
 
 
 def self_draft(model: Qwen3Model, num_layers: int) -> Qwen3Model:
@@ -109,7 +117,7 @@ class DraftProposer:
         if shadow is not None:
             self.manager.free(shadow)
 
-    def propose(self, requests: list[Request]) -> dict[int, tuple[list[int], mx.array]]:
+    def propose(self, requests: list[Request]) -> dict[int, tuple[list[int], torch.Tensor]]:
         """k batched draft passes, returning each request's k tokens and the k x V
         distribution q they were drawn from, after its own temperature, top-k and top-p:
         the acceptance test is exact only against the q that was actually sampled.
@@ -138,15 +146,14 @@ class DraftProposer:
             caches = self.kv.caches(batch)
             logits = self.model(batch.input_ids[None], batch.positions, caches, rows=batch.last_rows)
             q = sampling_probabilities(logits[0], params)
-            # log(0) = -inf, so a greedy row's one-hot q draws its argmax exactly.
-            drawn = mx.random.categorical(mx.log(q), axis=-1)
-            mx.eval(drawn, q, self.kv.keys, self.kv.values)
+            # A zero probability is never drawn, so a greedy row's one-hot q yields its argmax.
+            drawn = torch.multinomial(q, 1).squeeze(-1)
             steps.append(q)
             for (shadow, count), token in zip(scheduled, drawn.tolist(), strict=True):
                 shadow.num_computed_tokens += count
                 shadow.output_token_ids.append(token)
 
-        q_all = mx.stack(steps, axis=1)  # N x k x V
+        q_all = torch.stack(steps, dim=1)  # N x k x V
         return {
             request.request_id: (shadow.output_token_ids[-k:], q_all[index])
             for index, (request, shadow) in enumerate(chosen)
@@ -203,7 +210,7 @@ class SpeculativeDecoder:
         self.proposer = proposer
         self.manager = manager
         self.stats = SpecStats()
-        self.draft_probs: dict[int, mx.array] = {}
+        self.draft_probs: dict[int, torch.Tensor] = {}
 
     def propose(self, requests: list[Request]) -> None:
         """Attach proposals to every decoding request the draft pool can take."""
@@ -214,7 +221,7 @@ class SpeculativeDecoder:
                 request.proposed_token_ids = list(tokens)
                 self.draft_probs[request.request_id] = q
 
-    def verify(self, request: Request, target_logits: mx.array) -> list[int]:
+    def verify(self, request: Request, target_logits: torch.Tensor) -> list[int]:
         """Judge a request's proposals from its k + 1 target rows, commit what survives,
         give back the rejected tail's slots, and return the tokens it emitted.
 

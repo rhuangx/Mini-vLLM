@@ -1,5 +1,5 @@
 """One request at a time, where nothing batches and only the kernels and the cache are working:
-time to first token and decode rate, against mlx_lm's generate_step.
+time to first token and decode rate, against a transformers greedy loop.
 
     uv run python benches/bench_generate.py --prompt-lens 128 1024 --max-tokens 128
 """
@@ -10,14 +10,13 @@ import argparse
 import statistics
 import time
 
-import mlx.core as mx
+import torch
 from matplotlib.figure import Figure
-from mlx_lm.generate import generate_step
 from utils import (
     engine,
     evidence,
     grouped_bars,
-    load_mlx_lm,
+    load_hf,
     random_prompts,
     save_plot,
     token_times,
@@ -37,12 +36,22 @@ def median_rates(runs: list[list[float]]) -> tuple[float, float]:
     return statistics.median(ttfts), statistics.median(decodes)
 
 
-def mlx_lm_times(model, prompt: list[int], max_tokens: int) -> list[float]:
-    """generate_step is the loop under stream_generate, which adds ~47 ms of setup per call
-    (wiring the model's memory) that a server pays once, not per request."""
+def hf_times(model, prompt: list[int], max_tokens: int) -> list[float]:
+    """Greedy decoding with the HF cache: the first forward is the prompt, then one token."""
+    device = model.device
+    ids = torch.tensor([prompt], device=device)
+    past = None
     start = time.perf_counter()
-    steps = generate_step(mx.array(prompt), model, max_tokens=max_tokens)
-    return [time.perf_counter() - start for _ in steps]
+    times = []
+    with torch.no_grad():
+        for _ in range(max_tokens):
+            out = model(ids, past_key_values=past, use_cache=True)
+            past = out.past_key_values
+            token = int(torch.argmax(out.logits[0, -1]))
+            torch.cuda.synchronize()
+            times.append(time.perf_counter() - start)
+            ids = torch.tensor([[token]], device=device)
+    return times
 
 
 def main() -> None:
@@ -55,21 +64,21 @@ def main() -> None:
 
     title = f"Single request: {args.max_tokens} output tokens, median of {args.repeats}"
     with evidence(title):
-        mlx_model, tokenizer = load_mlx_lm(args.model)
+        hf_model, tokenizer = load_hf(args.model)
         prompts = random_prompts(len(args.prompt_lens), args.prompt_lens, len(tokenizer.vocab))
 
         results = {}
-        for label, use_metal in variants():
-            llm = engine(mlx_model, tokenizer, use_metal, num_blocks=512)
+        for label, use_cuda in variants():
+            llm = engine(hf_model, tokenizer, use_cuda, num_blocks=512)
             for prompt in prompts:
                 runs = [token_times(llm.generate_stream(prompt, max_tokens=args.max_tokens))[0]
                         for _ in range(args.repeats)]
                 results[label, len(prompt)] = median_rates(runs)
 
-        mlx_lm_times(mlx_model, [1] * 32, 4)  # warm-up
+        hf_times(hf_model, [1] * 32, 4)  # warm-up
         for prompt in prompts:
-            runs = [mlx_lm_times(mlx_model, prompt, args.max_tokens) for _ in range(args.repeats)]
-            results["mlx_lm generate_step", len(prompt)] = median_rates(runs)
+            runs = [hf_times(hf_model, prompt, args.max_tokens) for _ in range(args.repeats)]
+            results["transformers greedy", len(prompt)] = median_rates(runs)
 
         print("| engine | prompt tokens | TTFT | decode |")
         print("|---|---|---|---|")

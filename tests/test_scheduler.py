@@ -4,12 +4,12 @@ the paged pool, each against the request run alone through the dense cache."""
 
 import random
 
-import mlx.core as mx
 import pytest
+import torch
 
 from mini_vllm.batch import ForwardBatch
 from mini_vllm.generate import GREEDY, generate_with_kv_cache
-from mini_vllm.models import from_mlx
+from mini_vllm.models import from_hf
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
 from mini_vllm.sampler import sample
 from mini_vllm.scheduler import Request, RequestStatus, Scheduler, SchedulerConfig
@@ -268,19 +268,17 @@ def run(scheduler: Scheduler, model, kv: PagedKvPool, max_iterations: int = 2000
         output = scheduler.schedule()
         preempted += len(output.preempted)
         batch = ForwardBatch.from_scheduled(output.scheduled, scheduler.manager)
-        logits = model(batch.input_ids[None], batch.positions, kv.caches(batch))[0, batch.last_rows]
+        logits = model(batch.input_ids[None], batch.positions, kv.caches(batch))[0, batch.last_rows.long()]
         tokens = sample(logits, [r.sampling_params for r in output.requests]).tolist()
-        # MLX is lazy: materialize the pages so the next step's graph does not reach back.
-        mx.eval(kv.keys, kv.values)
         scheduler.commit(output, tokens)
     raise AssertionError("the scheduler stopped making progress")
 
 
 def paged(tiny_qwen3, num_blocks=64, block_size=8, prefix_caching=False, **config):
-    model = from_mlx(tiny_qwen3)
+    model = from_hf(tiny_qwen3)
     c = model.config
     kv = PagedKvPool(c.num_hidden_layers, num_blocks, block_size, c.num_key_value_heads, c.head_dim,
-                     dtype=mx.float32)
+                     dtype=torch.float32, device=model.embedding.weight.device)
     scheduler = Scheduler(SchedulerConfig(**config), BlockManager(kv, prefix_caching))
     return model, kv, scheduler
 
@@ -307,7 +305,7 @@ def test_a_batched_run_is_token_identical_to_each_request_alone(tiny_qwen3):
 
 
 def test_a_chunked_and_piggybacked_run_is_token_identical(tiny_qwen3):
-    prompts = [mx.random.randint(0, 512, (n,)).tolist() for n in (33, 5, 17, 1, 40, 2)]
+    prompts = [torch.randint(0, 512, (n,)).tolist() for n in (33, 5, 17, 1, 40, 2)]
     check_identity(tiny_qwen3, prompts, 5, max_batched_tokens=12, max_sequences=4, chunk_size=8)
 
 
@@ -319,7 +317,7 @@ def test_a_small_pool_forces_preemption_and_changes_nothing(tiny_qwen3):
 
 
 def test_prefix_caching_changes_nothing(tiny_qwen3):
-    shared = mx.random.randint(0, 512, (20,)).tolist()
+    shared = torch.randint(0, 512, (20,)).tolist()
     prompts = [[*shared, tail] for tail in (1, 2, 3, 4)] + [shared]
     # One at a time, so each request finds the previous one's pages cached.
     check_identity(tiny_qwen3, prompts, 5, prefix_caching=True, max_sequences=1)

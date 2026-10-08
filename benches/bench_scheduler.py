@@ -2,7 +2,7 @@
 every twentieth, replayed through each chunk size. A long prompt run in one pass stalls every
 decode in flight for that pass; chunking bounds the stall at one chunk.
 
-    uv run python benches/bench_scheduler.py --metal
+    uv run python benches/bench_scheduler.py --cuda
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from collections import deque
 from itertools import pairwise
 
 from matplotlib.figure import Figure
-from utils import engine, evidence, grouped_bars, load_mlx_lm, percentile, random_prompts, save_plot
+from utils import engine, evidence, grouped_bars, load_hf, percentile, random_prompts, save_plot
 
 from mini_vllm import DEFAULT_MODEL, LLM, Request
 
@@ -45,7 +45,7 @@ def replay(llm: LLM, prompts: list[list[int]], arrivals: list[float], max_tokens
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--metal", action="store_true", help="run on the Metal kernels in src/extensions/")
+    parser.add_argument("--cuda", action="store_true", help="run on the CUDA kernels in src/extensions/")
     parser.add_argument("--requests", type=int, default=200)
     parser.add_argument("--rate", type=float, default=10.0, help="mean arrivals per second (Poisson)")
     parser.add_argument("--short-len", type=int, default=32)
@@ -56,9 +56,9 @@ def main() -> None:
 
     title = (f"Scheduler: {args.requests} requests at {args.rate:g}/s, {args.short_len}-token "
              f"prompts with a {args.long_len}-token one every 20th, {args.max_tokens} output "
-             f"tokens each, {'metal' if args.metal else 'pure'}")
+             f"tokens each, {'cuda' if args.cuda else 'pure'}")
     with evidence(title):
-        mlx_model, tokenizer = load_mlx_lm(args.model)
+        hf_model, tokenizer = load_hf(args.model)
         vocab = len(tokenizer.vocab)
         lengths = [args.long_len if i % 20 == 19 else args.short_len for i in range(args.requests)]
         prompts = [random_prompts(1, [length], vocab, seed=i)[0] for i, length in enumerate(lengths)]
@@ -78,7 +78,7 @@ def main() -> None:
         ttft_ms = {"p50": [], "p99": []}
         gap_ms = {"p50": [], "p99": [], "max": []}
         for label, config in policies:
-            llm = engine(mlx_model, tokenizer, args.metal, num_blocks=4096, max_sequences=32, **config)
+            llm = engine(hf_model, tokenizer, args.cuda, num_blocks=2048, max_sequences=32, **config)
             arrived, times = replay(llm, prompts, arrivals, args.max_tokens)
             ttfts = [times[r][0] - arrived[r] for r in times]
             gaps = [(b - a) * 1e3 for t in times.values() for a, b in pairwise(t)]

@@ -1,28 +1,43 @@
 [project]
 name = "mini-vllm"
 version = "0.1.0"
-description = "A paged-attention LLM inference engine for Apple silicon, on MLX and hand-written Metal."
+description = "A paged-attention LLM inference engine for NVIDIA GPUs, on PyTorch and hand-written CUDA."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mlx>=0.32.0",
-    "mlx-lm>=0.31.3",
+    "huggingface-hub>=1.0",
+    "torch>=2.11.0",
+    "transformers>=5.0",
 ]
 
 [dependency-groups]
 dev = [
+    "cmake>=3.27",
     "matplotlib>=3.9",
-    "nanobind==2.15.0",
+    "ninja>=1.11",
+    # nvcc for src/extensions, CUDA 13 like torch. 13.2, not 13.0: glibc 2.42 declares rsqrt, which 13.0's headers clash with.
+    "nvidia-cuda-cccl==13.2.*",
+    "nvidia-cuda-crt==13.2.*",
+    "nvidia-cuda-nvcc==13.2.*",
+    "nvidia-nvvm==13.2.*",
     "pytest>=8.3",
-    "setuptools>=62",
 ]
+
+# torch's CUDA 13 wheels live on PyTorch's own index; everything else comes from PyPI.
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# mini_vllm_ext is the Metal extension, built in place by src/extensions/build.py.
+# mini_vllm_ext is the CUDA extension, built in place by src/extensions/build.py.
 packages = ["src/mini_vllm", "src/extensions/mini_vllm_ext"]
 
 [tool.hatch.build]
@@ -32,4 +47,4 @@ dev-mode-dirs = ["src", "src/extensions"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = ["metal: runs a Metal kernel; build it first with uv run python src/extensions/build.py"]
+markers = ["cuda: runs a CUDA kernel; build it first with uv run python src/extensions/build.py"]

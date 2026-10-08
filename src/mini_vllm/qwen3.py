@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any
 
-import mlx.core as mx
+import torch
 
 from mini_vllm.attention import scaled_dot_product_attention_grouped
 from mini_vllm.basics import linear, swiglu
@@ -23,7 +23,7 @@ __all__ = ["ModelConfig", "Qwen3MLP", "Qwen3Model", "Qwen3MultiHeadAttention", "
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """The shape of a Qwen3 checkpoint, read off mlx_lm's ModelArgs."""
+    """The shape of a Qwen3 checkpoint, read off a transformers config."""
 
     vocab_size: int               # V
     hidden_size: int              # E
@@ -38,8 +38,24 @@ class ModelConfig:
     tie_word_embeddings: bool
 
     @classmethod
-    def from_mlx_args(cls, args: Any) -> ModelConfig:
-        return cls(**{field.name: getattr(args, field.name) for field in fields(cls)})
+    def from_hf_config(cls, config: Any) -> ModelConfig:
+        # transformers 5 stores the base in rope_parameters; older configs used rope_theta.
+        rope = getattr(config, "rope_parameters", None) or {}
+        theta = rope.get("rope_theta", getattr(config, "rope_theta", 1_000_000.0))
+        head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+        return cls(
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+            num_hidden_layers=config.num_hidden_layers,
+            num_attention_heads=config.num_attention_heads,
+            num_key_value_heads=config.num_key_value_heads,
+            head_dim=head_dim,
+            intermediate_size=config.intermediate_size,
+            rms_norm_eps=config.rms_norm_eps,
+            rope_theta=theta,
+            max_position_embeddings=config.max_position_embeddings,
+            tie_word_embeddings=config.tie_word_embeddings,
+        )
 
 
 class Qwen3MultiHeadAttention:
@@ -48,16 +64,16 @@ class Qwen3MultiHeadAttention:
     def __init__(
         self,
         config: ModelConfig,
-        wq: mx.array,
-        wk: mx.array,
-        wv: mx.array,
-        wo: mx.array,
+        wq: torch.Tensor,
+        wk: torch.Tensor,
+        wv: torch.Tensor,
+        wo: torch.Tensor,
         q_norm: RMSNorm,
         k_norm: RMSNorm,
         rope: RoPE,
-        use_metal: bool = False,
+        use_cuda: bool = False,
     ) -> None:
-        self.use_metal = use_metal
+        self.use_cuda = use_cuda
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
         self.head_dim = config.head_dim
@@ -65,7 +81,7 @@ class Qwen3MultiHeadAttention:
         self.q_norm, self.k_norm = q_norm, k_norm
         self.rope = rope
 
-    def __call__(self, x: mx.array, positions: mx.array, cache: Cache | None = None) -> mx.array:
+    def __call__(self, x: torch.Tensor, positions: torch.Tensor, cache: Cache | None = None) -> torch.Tensor:
         batch, length, _ = x.shape
 
         q = linear(x, self.wq).reshape(batch, length, self.num_heads, self.head_dim)
@@ -73,29 +89,31 @@ class Qwen3MultiHeadAttention:
         v = linear(x, self.wv).reshape(batch, length, self.num_kv_heads, self.head_dim)
 
         # RoPE rotates B x L x H x D; attention wants B x H x L x D.
-        q = self.rope(self.q_norm(q), positions).swapaxes(1, 2)
-        k = self.rope(self.k_norm(k), positions).swapaxes(1, 2)
-        v = v.swapaxes(1, 2)
+        q = self.rope(self.q_norm(q), positions).transpose(1, 2)
+        k = self.rope(self.k_norm(k), positions).transpose(1, 2)
+        v = v.transpose(1, 2)
 
         # The cache writes this step's k and v and attends over everything it holds: a dense
         # history, or each ragged sequence's own pages. Without one, the tokens see only each other.
         if cache is None:
-            out = scaled_dot_product_attention_grouped(q, k, v, mask="causal", use_metal=self.use_metal)
+            out = scaled_dot_product_attention_grouped(q, k, v, mask="causal", use_cuda=self.use_cuda)
         else:
-            out = cache.attend(q, k, v, self.use_metal)
-        return linear(out.swapaxes(1, 2).reshape(batch, length, -1), self.wo)
+            out = cache.attend(q, k, v, self.use_cuda)
+        return linear(out.transpose(1, 2).reshape(batch, length, -1), self.wo)
 
 
 class Qwen3MLP:
     """down(silu(gate(x)) * up(x))."""
 
-    def __init__(self, w_gate: mx.array, w_up: mx.array, w_down: mx.array, use_metal: bool = False) -> None:
+    def __init__(
+        self, w_gate: torch.Tensor, w_up: torch.Tensor, w_down: torch.Tensor, use_cuda: bool = False
+    ) -> None:
         self.w_gate, self.w_up, self.w_down = w_gate, w_up, w_down
-        self.use_metal = use_metal
+        self.use_cuda = use_cuda
 
-    def __call__(self, x: mx.array) -> mx.array:
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         gate, up = linear(x, self.w_gate), linear(x, self.w_up)
-        return linear(swiglu(gate, up, self.use_metal), self.w_down)
+        return linear(swiglu(gate, up, self.use_cuda), self.w_down)
 
 
 class Qwen3TransformerBlock:
@@ -113,7 +131,7 @@ class Qwen3TransformerBlock:
         self.input_layernorm = input_layernorm
         self.post_attention_layernorm = post_attention_layernorm
 
-    def __call__(self, x: mx.array, positions: mx.array, cache: Cache | None = None) -> mx.array:
+    def __call__(self, x: torch.Tensor, positions: torch.Tensor, cache: Cache | None = None) -> torch.Tensor:
         h = x + self.attention(self.input_layernorm(x), positions, cache)
         return h + self.mlp(self.post_attention_layernorm(h))
 
@@ -134,7 +152,7 @@ class Qwen3Model:
         embedding: Embedding,
         layers: list[Qwen3TransformerBlock],
         norm: RMSNorm,
-        lm_head: mx.array | None = None,
+        lm_head: torch.Tensor | None = None,
     ) -> None:
         self.config = config
         self.embedding = embedding
@@ -144,11 +162,11 @@ class Qwen3Model:
 
     def __call__(
         self,
-        inputs: mx.array,
-        positions: mx.array,
+        inputs: torch.Tensor,
+        positions: torch.Tensor,
         caches: list[Cache] | None = None,
-        rows: mx.array | None = None,
-    ) -> mx.array:
+        rows: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         h = self.embedding(inputs)
         for index, layer in enumerate(self.layers):
             h = layer(h, positions, None if caches is None else caches[index])
@@ -156,7 +174,7 @@ class Qwen3Model:
         # Only these token rows reach the LM head: one per sequence when serving, rather
         # than a V-wide row for every prompt token in a chunk.
         if rows is not None:
-            h = h[:, rows]
+            h = h[:, rows.long()]
         h = self.norm(h)
 
         if self.lm_head is None:

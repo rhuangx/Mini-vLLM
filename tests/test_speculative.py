@@ -1,10 +1,10 @@
 """speculative.py: the acceptance rule keeps the target's distribution, the bookkeeping
 commits and rolls back exactly, and greedy speculation changes no token."""
 
-import mlx.core as mx
 import pytest
+import torch
 from test_engine import PROMPTS, assert_nothing_held, engine
-from utils import assert_allclose, requires_metal
+from utils import assert_allclose, requires_cuda
 
 from mini_vllm.generate import generate_with_kv_cache
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
@@ -14,14 +14,14 @@ from mini_vllm.speculative import accept_proposals, residual_distribution
 
 # --- the rule -------------------------------------------------------------------------------
 
-P = mx.array([0.30, 0.25, 0.20, 0.10, 0.10, 0.05])  # the target
-Q = mx.array([0.05, 0.10, 0.10, 0.20, 0.25, 0.30])  # a draft that disagrees with it
+P = torch.tensor([0.30, 0.25, 0.20, 0.10, 0.10, 0.05])  # the target
+Q = torch.tensor([0.05, 0.10, 0.10, 0.20, 0.25, 0.30])  # a draft that disagrees with it
 
 
 def test_the_residual_is_the_mass_acceptance_leaves_behind():
     """min(p, q) is kept by acceptance; the residual, scaled by what is left, restores p."""
-    kept = mx.minimum(P, Q)
-    assert_allclose(kept + (1 - mx.sum(kept)) * residual_distribution(P, Q), P)
+    kept = torch.minimum(P, Q)
+    assert_allclose(kept + (1 - torch.sum(kept)) * residual_distribution(P, Q), P)
 
 
 @pytest.mark.parametrize("num_proposals", [1, 3])
@@ -29,9 +29,9 @@ def test_the_emitted_token_follows_the_target_not_the_draft(num_proposals):
     """Proposals drawn from q, verified against p: the first emitted token is distributed
     exactly as p, which is the whole claim of speculative decoding."""
     draws = 3000
-    target = mx.broadcast_to(P, (num_proposals + 1, 6))
-    draft = mx.broadcast_to(Q, (num_proposals, 6))
-    proposals = mx.random.categorical(mx.log(draft), num_samples=draws).T.tolist()  # draws x k
+    target = P.view(1, -1).expand(num_proposals + 1, -1)
+    draft = Q.view(1, -1).expand(num_proposals, -1)
+    proposals = torch.multinomial(draft, draws, replacement=True).T.tolist()  # draws x k
 
     counts = [0] * 6
     for proposed in proposals:
@@ -45,7 +45,7 @@ def test_the_emitted_token_follows_the_target_not_the_draft(num_proposals):
 
 
 def test_a_matching_draft_is_always_accepted():
-    target = mx.broadcast_to(P, (4, 6))
+    target = P.view(1, -1).expand(4, -1)
     for _ in range(20):
         tokens, accepted = accept_proposals(target, target[:3], [0, 1, 2])
         assert accepted == 3 and tokens[:3] == [0, 1, 2] and len(tokens) == 4, "plus the bonus"
@@ -53,14 +53,14 @@ def test_a_matching_draft_is_always_accepted():
 
 def test_a_rejection_truncates_rather_than_skipping():
     """A proposal the target gives no mass is always rejected, and nothing after it is kept."""
-    target = mx.broadcast_to(mx.array([0.0, 0.5, 0.5, 0.0, 0.0, 0.0]), (3, 6))
-    tokens, accepted = accept_proposals(target, mx.broadcast_to(Q, (2, 6)), [0, 1])
+    target = torch.tensor([0.0, 0.5, 0.5, 0.0, 0.0, 0.0]).view(1, -1).expand(3, -1)
+    tokens, accepted = accept_proposals(target, Q.view(1, -1).expand(2, -1), [0, 1])
     assert accepted == 0 and len(tokens) == 1 and tokens[0] in (1, 2)
 
 
 def test_greedy_keeps_exactly_the_prefix_where_the_models_agree():
-    one_hot = mx.eye(6)
-    target = one_hot[mx.array([2, 4, 1, 5])]  # the target's argmaxes: 2, 4, 1, then bonus 5
+    one_hot = torch.eye(6)
+    target = one_hot[torch.tensor([2, 4, 1, 5])]  # the target's argmaxes: 2, 4, 1, then bonus 5
 
     assert accept_proposals(target, target[:3], [2, 4, 0], greedy=True) == ([2, 4, 1], 2)
     assert accept_proposals(target, target[:3], [2, 4, 1], greedy=True) == ([2, 4, 1, 5], 3)
@@ -208,13 +208,13 @@ def test_sampled_speculation_replays_under_a_seed_and_leaks_nothing(tiny_qwen3):
     assert all(len(tokens) == 8 and max(tokens) < 512 for tokens in runs[0])
 
 
-@requires_metal
+@requires_cuda
 def test_greedy_speculation_on_the_kernels_changes_no_token(tiny_qwen3):
-    from mini_vllm.models import from_mlx
+    from mini_vllm.models import from_hf
 
-    llm = engine(tiny_qwen3, use_metal=True, num_speculative_tokens=3, num_draft_layers=1, num_blocks=14,
+    llm = engine(tiny_qwen3, use_cuda=True, num_speculative_tokens=3, num_draft_layers=1, num_blocks=14,
                  max_batched_tokens=16)
-    pure = from_mlx(tiny_qwen3)
+    pure = from_hf(tiny_qwen3)
     for prompt, completion in zip(PROMPTS, llm.generate(PROMPTS, max_tokens=8), strict=True):
         assert completion.token_ids == generate_with_kv_cache(pure, prompt, 8)
     assert_nothing_held(llm)

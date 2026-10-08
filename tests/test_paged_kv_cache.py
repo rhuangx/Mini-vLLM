@@ -1,9 +1,9 @@
 """paged_kv_cache.py: refcounts and slot arithmetic, copy-on-write, prefix reuse, fp8 pages,
 and attention through the pool against a dense cache."""
 
-import mlx.core as mx
 import pytest
-from utils import assert_allclose, requires_metal, with_and_without_metal
+import torch
+from utils import assert_allclose, requires_cuda, with_and_without_cuda
 
 from mini_vllm.attention import scaled_dot_product_attention_grouped
 from mini_vllm.batch import ForwardBatch
@@ -172,12 +172,14 @@ def test_writing_after_a_fork_copies_exactly_one_page():
 def test_the_copy_carries_the_cached_keys_and_values(fp8):
     """Copy-on-write moves data, not just ids; otherwise a fork attends over a blank page.
     An fp8 page is copied as its raw e4m3 bytes."""
-    manager = make_manager(num_blocks=4, num_layers=2, num_kv_heads=2, head_dim=8, dtype=mx.float32, fp8=fp8)
+    manager = make_manager(
+        num_blocks=4, num_layers=2, num_kv_heads=2, head_dim=8, dtype=torch.float32, fp8=fp8
+    )
     parent, child = request(range(6)), request(range(6))
     manager.allocate(parent, 6)
     for layer in range(2):
-        slots = mx.array(parent.block_table.slots(0, 6))
-        manager.kv.write(layer, slots, mx.random.normal((6, 2, 8)), mx.random.normal((6, 2, 8)))
+        slots = torch.tensor(parent.block_table.slots(0, 6))
+        manager.kv.write(layer, slots, torch.randn((6, 2, 8)), torch.randn((6, 2, 8)))
 
     manager.fork(parent, child)
     manager.allocate(child, 1)
@@ -186,8 +188,8 @@ def test_the_copy_carries_the_cached_keys_and_values(fp8):
     assert copied != page
     for layer in range(2):
         keys, values = manager.kv.pages(layer)
-        assert mx.array_equal(keys[copied], keys[page]).item()
-        assert mx.array_equal(values[copied], values[page]).item()
+        assert torch.equal(keys[copied], keys[page])
+        assert torch.equal(values[copied], values[page])
 
 
 def test_a_fork_whose_last_block_is_full_needs_no_copy():
@@ -249,21 +251,23 @@ def test_a_shared_prefix_reuses_the_same_physical_pages():
 
 
 def test_reused_kv_is_bit_for_bit_what_was_written():
-    manager = make_manager(num_blocks=16, prefix_caching=True, num_kv_heads=2, head_dim=8, dtype=mx.float32)
+    manager = make_manager(
+        num_blocks=16, prefix_caching=True, num_kv_heads=2, head_dim=8, dtype=torch.float32
+    )
     prompt = list(range(200, 224))
     first = request(prompt)
     manager.allocate(first, 24)
-    written = mx.random.normal((24, 2, 8))
-    manager.kv.write(0, mx.array(first.block_table.slots(0, 24)), written, -written)
+    written = torch.randn((24, 2, 8))
+    manager.kv.write(0, torch.tensor(first.block_table.slots(0, 24)), written, -written)
     manager.free(first)
 
     second = request(prompt)
     manager.apply_prefix_cache(second)
     manager.allocate(second, second.num_uncomputed_tokens)
 
-    slots = mx.array(second.block_table.slots(0, 20))
-    assert mx.array_equal(manager.kv.keys[0][slots], written[:20]).item()
-    assert mx.array_equal(manager.kv.values[0][slots], -written[:20]).item()
+    slots = torch.tensor(second.block_table.slots(0, 20))
+    assert torch.equal(manager.kv.keys[0][slots], written[:20])
+    assert torch.equal(manager.kv.values[0][slots], -written[:20])
 
 
 def test_a_full_match_still_leaves_a_token_to_forward():
@@ -305,22 +309,22 @@ def test_no_leaks_across_two_thousand_cached_requests():
 
 
 def test_an_fp8_pool_stores_e4m3_bits_in_half_the_bytes():
-    bf16 = PagedKvPool(2, 8, 16, 8, 128, dtype=mx.bfloat16)
-    fp8 = PagedKvPool(2, 8, 16, 8, 128, dtype=mx.bfloat16, fp8=True)
-    assert fp8.keys[0].dtype == mx.uint8
+    bf16 = PagedKvPool(2, 8, 16, 8, 128, dtype=torch.bfloat16)
+    fp8 = PagedKvPool(2, 8, 16, 8, 128, dtype=torch.bfloat16, fp8=True)
+    assert fp8.keys[0].dtype == torch.uint8
     assert sum(a.nbytes for a in bf16.keys + bf16.values) == 2 * sum(a.nbytes for a in fp8.keys + fp8.values)
 
 
 def test_fp8_pages_round_trip_through_their_scales():
-    pool = PagedKvPool(1, 4, 4, 2, 8, dtype=mx.float32, fp8=True, k_scale=0.5, v_scale=0.25)
-    key, value = mx.random.normal((6, 2, 8)), mx.random.normal((6, 2, 8))
-    pool.write(0, mx.arange(6), key, value)
+    pool = PagedKvPool(1, 4, 4, 2, 8, dtype=torch.float32, fp8=True, k_scale=0.5, v_scale=0.25)
+    key, value = torch.randn((6, 2, 8)), torch.randn((6, 2, 8))
+    pool.write(0, torch.arange(6), key, value)
 
     keys, values = (pages.reshape(-1, 2, 8)[:6] for pages in pool.pages(0))
     # e4m3 rounds to within 2^-4 relative, plus half its 2^-9 subnormal step times the scale.
     for stored, original, scale in ((keys, key, 0.5), (values, value, 0.25)):
-        back = dequantize_fp8(stored, scale, mx.float32)
-        assert mx.all(mx.abs(back - original) <= 2**-4 * mx.abs(original) + scale * 2**-10).item()
+        back = dequantize_fp8(stored, scale, torch.float32)
+        assert torch.all(torch.abs(back - original) <= 2**-4 * torch.abs(original) + scale * 2**-10)
 
 
 # --- attention through the pool -------------------------------------------------------------
@@ -328,49 +332,53 @@ def test_fp8_pages_round_trip_through_their_scales():
 HEADS, KV_HEADS, DIM = 4, 2, 8
 
 
-def nan_manager(num_blocks=16, block_size=4) -> BlockManager:
+def nan_manager(num_blocks=16, block_size=4, device="cpu") -> BlockManager:
     """A pool filled with NaN, so a read of any slot that was not written poisons the output."""
-    manager = make_manager(num_blocks, block_size, num_kv_heads=KV_HEADS, head_dim=DIM, dtype=mx.float32)
+    manager = make_manager(num_blocks, block_size, num_kv_heads=KV_HEADS, head_dim=DIM,
+                           dtype=torch.float32, device=device)
     kv = manager.kv
-    kv.keys = [mx.full(pool.shape, mx.nan) for pool in kv.keys]
-    kv.values = [mx.full(pool.shape, mx.nan) for pool in kv.values]
+    kv.keys = [torch.full(pool.shape, float("nan"), dtype=pool.dtype, device=pool.device) for pool in kv.keys]
+    kv.values = [
+        torch.full(pool.shape, float("nan"), dtype=pool.dtype, device=pool.device) for pool in kv.values
+    ]
     return manager
 
 
-def attend(manager: BlockManager, scheduled, q, k, v, use_metal=False) -> mx.array:
+def attend(manager: BlockManager, scheduled, q, k, v, use_cuda=False) -> torch.Tensor:
     """Allocate, build the batch, and attend through layer 0 on [T, H, D] inputs."""
     for r, count in scheduled:
         manager.allocate(r, count)
     batch = ForwardBatch.from_scheduled(scheduled, manager)
     cache = PagedKvCache(manager.kv, 0, batch)
-    as_row = lambda x: x.swapaxes(0, 1)[None]  # noqa: E731
-    out = cache.attend(as_row(q), as_row(k), as_row(v), use_metal)
+    as_row = lambda x: x.transpose(0, 1)[None]  # noqa: E731
+    out = cache.attend(as_row(q), as_row(k), as_row(v), use_cuda)
     for r, count in scheduled:
         r.num_computed_tokens += count
-    return out[0].swapaxes(0, 1)
+    return out[0].transpose(0, 1)
 
 
-def dense(q, k, v) -> mx.array:
+def dense(q, k, v) -> torch.Tensor:
     """Causal attention over one sequence's contiguous [S, H, D] history."""
     out = scaled_dot_product_attention_grouped(
-        q.swapaxes(0, 1), k.swapaxes(0, 1), v.swapaxes(0, 1), mask="causal"
+        q.transpose(0, 1), k.transpose(0, 1), v.transpose(0, 1), mask="causal"
     )
-    return out.swapaxes(0, 1)
+    return out.transpose(0, 1)
 
 
-def qkv(length):
+def qkv(length, device="cpu"):
     return (
-        mx.random.normal((length, HEADS, DIM)),
-        mx.random.normal((length, KV_HEADS, DIM)),
-        mx.random.normal((length, KV_HEADS, DIM)),
+        torch.randn(length, HEADS, DIM, device=device),
+        torch.randn(length, KV_HEADS, DIM, device=device),
+        torch.randn(length, KV_HEADS, DIM, device=device),
     )
 
 
-@with_and_without_metal
-def test_attending_through_the_pool_matches_a_dense_cache(use_metal):
-    manager = nan_manager()
-    q, k, v = qkv(10)
-    assert_allclose(attend(manager, [(request(range(10)), 10)], q, k, v, use_metal), dense(q, k, v))
+@with_and_without_cuda
+def test_attending_through_the_pool_matches_a_dense_cache(use_cuda):
+    device = "cuda" if use_cuda else "cpu"
+    manager = nan_manager(device=device)
+    q, k, v = qkv(10, device)
+    assert_allclose(attend(manager, [(request(range(10)), 10)], q, k, v, use_cuda), dense(q, k, v))
 
 
 def test_a_shuffled_block_table_changes_nothing():
@@ -388,50 +396,53 @@ def test_a_shuffled_block_table_changes_nothing():
     assert_allclose(attend(manager, [(r, 12)], q, k, v), dense(q, k, v))
 
 
-@with_and_without_metal
-def test_a_mixed_batch_matches_each_sequence_alone(use_metal):
+@with_and_without_cuda
+def test_a_mixed_batch_matches_each_sequence_alone(use_cuda):
     """Two decodes beside a fresh prefill in one call: the shape the paged kernel serves.
     Block size 4 against lengths 7 and 5, so both decodes land mid-page."""
-    manager = nan_manager()
+    device = "cuda" if use_cuda else "cpu"
+    manager = nan_manager(device=device)
     old = [request(range(7)), request(range(5))]
     history = {}
     for r in old:
-        q, k, v = qkv(len(r))
-        attend(manager, [(r, len(r))], q, k, v, use_metal)
+        q, k, v = qkv(len(r), device)
+        attend(manager, [(r, len(r))], q, k, v, use_cuda)
         history[r.request_id] = (k, v)
         r.output_token_ids.append(9)
 
     fresh = request(range(6))
     scheduled = [(old[0], 1), (old[1], 1), (fresh, 6)]
-    q, k, v = qkv(8)
-    together = attend(manager, scheduled, q, k, v, use_metal)
+    q, k, v = qkv(8, device)
+    together = attend(manager, scheduled, q, k, v, use_cuda)
 
     rows = {old[0].request_id: slice(0, 1), old[1].request_id: slice(1, 2), fresh.request_id: slice(2, 8)}
     for r, _ in scheduled:
         mine = rows[r.request_id]
         past_k, past_v = history.get(r.request_id, (k[:0], v[:0]))
-        expected = dense(q[mine], mx.concatenate([past_k, k[mine]]), mx.concatenate([past_v, v[mine]]))
+        expected = dense(q[mine], torch.cat([past_k, k[mine]]), torch.cat([past_v, v[mine]]))
         assert_allclose(together[mine], expected)
 
 
-@requires_metal
+@requires_cuda
 @pytest.mark.parametrize("fp8", [False, True])
-def test_the_metal_write_is_the_pure_write_in_place(fp8):
+def test_the_cuda_write_is_the_pure_write_in_place(fp8):
     """Both pools start from the same random contents, so a slot the kernel should not have
-    touched would show. fp8 pages must match to the bit: the kernel quantizes as mx.to_fp8 does."""
+    touched would show. fp8 pages must match to the bit: the kernel quantizes as quantize_fp8 does."""
     scales = {"k_scale": 0.5, "v_scale": 0.25}
-    pools = [PagedKvPool(2, 8, 4, 2, 8, dtype=mx.bfloat16, fp8=fp8, **scales) for _ in range(2)]
-    start = mx.random.randint(0, 255, pools[0].keys[0].shape).astype(pools[0].keys[0].dtype)
+    pools = [
+        PagedKvPool(2, 8, 4, 2, 8, dtype=torch.bfloat16, device="cuda", fp8=fp8, **scales) for _ in range(2)
+    ]
+    start = torch.randint(0, 255, pools[0].keys[0].shape, device="cuda").to(pools[0].keys[0].dtype)
     for pool in pools:
         pool.keys = [start + 0 for _ in pool.keys]
         pool.values = [start + 1 for _ in pool.values]
 
-    slots = mx.array([5, 17, 3, 30], dtype=mx.int32)
-    key = mx.random.normal((4, 2, 8)).astype(mx.bfloat16)
-    value = mx.random.normal((4, 2, 8)).astype(mx.bfloat16)
+    slots = torch.tensor([5, 17, 3, 30], dtype=torch.int32, device="cuda")
+    key = torch.randn(4, 2, 8, device="cuda").bfloat16()
+    value = torch.randn(4, 2, 8, device="cuda").bfloat16()
     pools[0].write(1, slots, key, value)
-    pools[1].write(1, slots, key, value, use_metal=True)
+    pools[1].write(1, slots, key, value, use_cuda=True)
 
     for layer in range(2):
-        assert mx.array_equal(pools[1].keys[layer], pools[0].keys[layer]).item()
-        assert mx.array_equal(pools[1].values[layer], pools[0].values[layer]).item()
+        assert torch.equal(pools[1].keys[layer], pools[0].keys[layer])
+        assert torch.equal(pools[1].values[layer], pools[0].values[layer])

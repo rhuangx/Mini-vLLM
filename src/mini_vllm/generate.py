@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-import mlx.core as mx
+import torch
 
 from mini_vllm.kv_cache import KvFullCache
 from mini_vllm.qwen3 import Qwen3Model
@@ -15,6 +15,10 @@ __all__ = ["GREEDY", "generate_with_kv_cache", "simple_generate"]
 GREEDY = SamplingParams(temperature=0.0)
 
 
+def _device(model: Qwen3Model) -> torch.device:
+    return model.embedding.weight.device
+
+
 def simple_generate(
     model: Qwen3Model,
     prompt: list[int],
@@ -23,10 +27,14 @@ def simple_generate(
     eos_token_ids: Collection[int] = (),
 ) -> list[int]:
     """Recompute the whole sequence for every new token: quadratic, and needing no cache."""
+    device = _device(model)
     tokens = list(prompt)
     for _ in range(max_tokens):
-        logits = model(mx.array([tokens]), mx.arange(len(tokens)))
-        token = sample(logits[:, -1], params).item()
+        logits = model(
+            torch.tensor([tokens], dtype=torch.int32, device=device),
+            torch.arange(len(tokens), device=device),
+        )
+        token = int(sample(logits[:, -1], params).item())
         tokens.append(token)
         if token in eos_token_ids:
             break
@@ -42,20 +50,28 @@ def generate_with_kv_cache(
     prefill_chunk: int | None = None,
 ) -> list[int]:
     """Prefill the prompt, prefill_chunk tokens at a time, then forward one token per step."""
+    device = _device(model)
     caches = [KvFullCache() for _ in model.layers]
 
     chunk = prefill_chunk or len(prompt)
+    logits = None
     for start in range(0, len(prompt), chunk):
         piece = prompt[start : start + chunk]
-        logits = model(mx.array([piece]), mx.arange(start, start + len(piece)), caches)
-        # MLX is lazy: evaluate each chunk's cache so one graph never spans the whole prompt.
-        mx.eval([(cache.keys, cache.values) for cache in caches])
+        logits = model(
+            torch.tensor([piece], dtype=torch.int32, device=device),
+            torch.arange(start, start + len(piece), device=device),
+            caches,
+        )
 
     generated = []
     while True:
-        token = sample(logits[:, -1], params).item()
+        token = int(sample(logits[:, -1], params).item())
         generated.append(token)
         if token in eos_token_ids or len(generated) == max_tokens:
             return generated
         # The new token sits at the position right after everything cached.
-        logits = model(mx.array([[token]]), mx.array([caches[0].offset]), caches)
+        logits = model(
+            torch.tensor([[token]], dtype=torch.int32, device=device),
+            torch.tensor([caches[0].offset], device=device),
+            caches,
+        )

@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-import mlx.core as mx
+import torch
 
 from mini_vllm.attention import paged_attention
 from mini_vllm.prefix_cache import PrefixCache
@@ -124,7 +124,8 @@ class PagedKvPool:
         block_size: int,
         num_kv_heads: int,
         head_dim: int,
-        dtype: mx.Dtype = mx.bfloat16,
+        dtype: torch.dtype = torch.bfloat16,
+        device: torch.device | None = None,
         fp8: bool = False,
         k_scale: float = 1.0,
         v_scale: float = 1.0,
@@ -139,36 +140,42 @@ class PagedKvPool:
         self.v_scale = v_scale
 
         shape = (num_blocks * block_size, num_kv_heads, head_dim)
-        storage = mx.uint8 if fp8 else dtype
-        self.keys = [mx.zeros(shape, dtype=storage) for _ in range(num_layers)]
-        self.values = [mx.zeros(shape, dtype=storage) for _ in range(num_layers)]
+        storage = torch.uint8 if fp8 else dtype
+        if device is None:
+            device = torch.device("cpu")
+        self.keys = [torch.zeros(shape, dtype=storage, device=device) for _ in range(num_layers)]
+        self.values = [torch.zeros(shape, dtype=storage, device=device) for _ in range(num_layers)]
 
     def write(
-        self, layer: int, slot_mapping: mx.array, key: mx.array, value: mx.array, use_metal: bool = False
+        self,
+        layer: int,
+        slot_mapping: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        use_cuda: bool = False,
     ) -> None:
         """Scatter key/value [T, H_k, D] into the slots slot_mapping names.
 
-        MLX donates the pool's buffer to the scatter when nothing else holds it, so this
-        costs the T slots written, not a copy of the pool. The Metal kernels write in place
-        by construction, quantizing to fp8 in the same pass.
+        The write is in place: index_copy_ on the pure path, and the CUDA kernels, which
+        quantize to fp8 in the same pass and do not rebind the pool tensors.
         """
-        if use_metal:
+        if use_cuda:
             import mini_vllm_ext
 
             if self.fp8:
-                scatter = mini_vllm_ext.kv_quantize_scatter
-                self.keys[layer] = scatter(self.keys[layer], slot_mapping, key, self.k_scale)
-                self.values[layer] = scatter(self.values[layer], slot_mapping, value, self.v_scale)
+                mini_vllm_ext.kv_quantize_scatter(self.keys[layer], slot_mapping, key, self.k_scale)
+                mini_vllm_ext.kv_quantize_scatter(self.values[layer], slot_mapping, value, self.v_scale)
             else:
-                self.keys[layer] = mini_vllm_ext.paged_cache_update(self.keys[layer], slot_mapping, key)
-                self.values[layer] = mini_vllm_ext.paged_cache_update(self.values[layer], slot_mapping, value)
+                mini_vllm_ext.paged_cache_update(self.keys[layer], slot_mapping, key)
+                mini_vllm_ext.paged_cache_update(self.values[layer], slot_mapping, value)
             return
         if self.fp8:
             key, value = quantize_fp8(key, self.k_scale), quantize_fp8(value, self.v_scale)
-        self.keys[layer][slot_mapping] = key.astype(self.keys[layer].dtype)
-        self.values[layer][slot_mapping] = value.astype(self.values[layer].dtype)
+        slots = slot_mapping.long()
+        self.keys[layer].index_copy_(0, slots, key.to(self.keys[layer].dtype))
+        self.values[layer].index_copy_(0, slots, value.to(self.values[layer].dtype))
 
-    def pages(self, layer: int) -> tuple[mx.array, mx.array]:
+    def pages(self, layer: int) -> tuple[torch.Tensor, torch.Tensor]:
         """One layer's keys and values as num_blocks x P x H_k x D."""
         shape = (self.num_blocks, self.block_size, self.num_kv_heads, self.head_dim)
         return self.keys[layer].reshape(shape), self.values[layer].reshape(shape)
@@ -195,14 +202,23 @@ class PagedKvCache:
         self.layer = layer
         self.batch = batch
 
-    def attend(self, q: mx.array, k: mx.array, v: mx.array, use_metal: bool = False) -> mx.array:
+    def attend(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, use_cuda: bool = False
+    ) -> torch.Tensor:
         """Write this batch's keys and values into their slots, then attend each sequence
         over its own pages."""
         pool, batch = self.pool, self.batch
-        pool.write(self.layer, batch.slot_mapping, k[0].swapaxes(0, 1), v[0].swapaxes(0, 1), use_metal)
+        # k, v arrive as 1 x H_k x T x D; the pool wants T x H_k x D, contiguous.
+        pool.write(
+            self.layer,
+            batch.slot_mapping,
+            k[0].transpose(0, 1).contiguous(),
+            v[0].transpose(0, 1).contiguous(),
+            use_cuda,
+        )
         key_pages, value_pages = pool.pages(self.layer)
         out = paged_attention(
-            q[0].swapaxes(0, 1),
+            q[0].transpose(0, 1),
             key_pages,
             value_pages,
             batch.block_tables,
@@ -210,9 +226,10 @@ class PagedKvCache:
             batch.context_lens,
             k_scale=pool.k_scale,
             v_scale=pool.v_scale,
-            use_metal=use_metal,
+            use_cuda=use_cuda,
+            host=batch.host,
         )
-        return out.swapaxes(0, 1)[None]
+        return out.transpose(0, 1)[None]
 
 
 class BlockManager:

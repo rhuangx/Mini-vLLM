@@ -2,7 +2,7 @@
 twice as many fit: more requests in flight, fewer preemptions. What it costs is fidelity,
 measured as greedy output that stops matching bf16's.
 
-    uv run python benches/bench_quantize.py --metal
+    uv run python benches/bench_quantize.py --cuda
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import statistics
 import time
 
 from matplotlib.figure import Figure
-from utils import engine, evidence, load_mlx_lm, random_prompts, save_plot
+from utils import engine, evidence, load_hf, random_prompts, save_plot
 
 from mini_vllm import DEFAULT_MODEL, LLM
 
@@ -46,7 +46,7 @@ def first_divergence(a: list[int], b: list[int]) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--metal", action="store_true", help="run on the Metal kernels in src/extensions/")
+    parser.add_argument("--cuda", action="store_true", help="run on the CUDA kernels in src/extensions/")
     parser.add_argument("--kv-mb", type=int, default=512, help="the KV memory budget both dtypes get")
     parser.add_argument("--requests", type=int, default=64)
     parser.add_argument("--prompt-len", type=int, default=512)
@@ -54,10 +54,10 @@ def main() -> None:
     args = parser.parse_args()
 
     title = (f"FP8 KV: {args.requests} requests of {args.prompt_len} + {args.max_tokens} tokens "
-             f"in {args.kv_mb} MB of KV, {'metal' if args.metal else 'pure'}")
+             f"in {args.kv_mb} MB of KV, {'cuda' if args.cuda else 'pure'}")
     with evidence(title):
-        mlx_model, tokenizer = load_mlx_lm(args.model)
-        a = mlx_model.args
+        hf_model, tokenizer = load_hf(args.model)
+        a = hf_model.config
         prompts = random_prompts(args.requests, [args.prompt_len], len(tokenizer.vocab))
 
         print("| KV pages | bytes per token | pages in budget | most requests in flight | throughput |")
@@ -67,7 +67,7 @@ def main() -> None:
         for fp8 in (False, True):
             per_token = 2 * a.num_hidden_layers * a.num_key_value_heads * a.head_dim * (1 if fp8 else 2)
             num_blocks = args.kv_mb * 2**20 // (16 * per_token)
-            llm = engine(mlx_model, tokenizer, args.metal, num_blocks=num_blocks,
+            llm = engine(hf_model, tokenizer, args.cuda, num_blocks=num_blocks,
                          max_sequences=args.requests, fp8_kv_cache=fp8)
             rate, peak = serve(llm, prompts, args.max_tokens)
             dtypes.append("fp8" if fp8 else "bf16")

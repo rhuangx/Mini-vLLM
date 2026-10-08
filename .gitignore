@@ -19,7 +19,3 @@ results/
 *.nsys-rep
 
 .DS_Store
-
-# MLX extension build products
-*.metallib
-*.dylib

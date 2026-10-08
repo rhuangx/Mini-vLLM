@@ -1,44 +1,45 @@
-"""layer_norm.py against mx.fast.rms_norm."""
+"""layer_norm.py against F.rms_norm."""
 
-import mlx.core as mx
 import pytest
-from utils import DTYPES, assert_allclose, requires_metal
+import torch
+import torch.nn.functional as F
+from utils import DTYPES, assert_allclose, requires_cuda
 
 from mini_vllm.layer_norm import RMSNorm
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("dim", [128, 1024])  # Qwen3-0.6B's per-head q/k norm and its hidden size
-def test_rms_norm_matches_mx_fast(dtype, dim):
-    weight = (1 + 0.1 * mx.random.normal((dim,))).astype(dtype)
-    x = (3 * mx.random.normal((2, 5, dim))).astype(dtype)
+def test_rms_norm_matches_torch(dtype, dim):
+    weight = (1 + 0.1 * torch.randn(dim)).to(dtype)
+    x = (3 * torch.randn(2, 5, dim)).to(dtype)
 
-    assert_allclose(RMSNorm(dim, weight)(x), mx.fast.rms_norm(x, weight, 1e-6))
+    assert_allclose(RMSNorm(dim, weight)(x), F.rms_norm(x, (dim,), weight, 1e-6))
 
 
 def test_rms_norm_casts_back_before_the_weight_multiply():
-    weight = (1 + 0.1 * mx.random.normal((64,))).astype(mx.bfloat16)
-    x = mx.random.normal((4, 64)).astype(mx.bfloat16)
+    weight = (1 + 0.1 * torch.randn(64)).bfloat16()
+    x = torch.randn(4, 64).bfloat16()
 
-    x32 = x.astype(mx.float32)
-    normalized = x32 * mx.rsqrt(mx.mean(x32 * x32, axis=-1, keepdims=True) + 1e-6)
-    expected = weight * normalized.astype(mx.bfloat16)
+    x32 = x.float()
+    normalized = x32 * torch.rsqrt(torch.mean(x32 * x32, dim=-1, keepdim=True) + 1e-6)
+    expected = weight * normalized.bfloat16()
 
-    assert mx.array_equal(RMSNorm(64, weight)(x), expected).item()
+    assert torch.equal(RMSNorm(64, weight)(x), expected)
 
 
-@requires_metal
+@requires_cuda
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("dim", [128, 1024, 3000])  # a q/k head, the hidden size, a strided row
 def test_the_rms_norm_kernel_matches_the_oracle(dtype, dim):
     """In bf16 and fp16 the kernel is bit-exact, which is what shows it rounds before the
     weight multiply as the oracle does. In fp32 it sums the squares in a different order,
     so a fraction of outputs move by an ulp."""
-    weight = (1 + 0.1 * mx.random.normal((dim,))).astype(dtype)
-    x = (3 * mx.random.normal((4, 3, dim))).astype(dtype)
-    norm, metal = RMSNorm(dim, weight), RMSNorm(dim, weight, use_metal=True)
-    for rows in (x, x.swapaxes(0, 1)):  # contiguous, then a strided view
-        if dtype == mx.float32:
-            assert_allclose(metal(rows), norm(rows))
+    weight = (1 + 0.1 * torch.randn(dim, device="cuda")).to(dtype)
+    x = (3 * torch.randn(4, 3, dim, device="cuda")).to(dtype)
+    norm, cuda = RMSNorm(dim, weight), RMSNorm(dim, weight, use_cuda=True)
+    for rows in (x, x.transpose(0, 1)):  # contiguous, then a strided view
+        if dtype == torch.float32:
+            assert_allclose(cuda(rows), norm(rows))
         else:
-            assert mx.array_equal(metal(rows), norm(rows)).item()
+            assert torch.equal(cuda(rows), norm(rows))

@@ -1,13 +1,13 @@
 """engine.py: the serving loop against the dense single-request loop, the stream against the
 batch API, prefix caching, parallel sampling, stop tokens, and cleanup."""
 
-import mlx.core as mx
 import pytest
-from utils import with_and_without_metal
+import torch
+from utils import with_and_without_cuda
 
 from mini_vllm.engine import LLM, EngineConfig
 from mini_vllm.generate import generate_with_kv_cache
-from mini_vllm.models import from_mlx
+from mini_vllm.models import from_hf
 from mini_vllm.sampler import SamplingParams
 
 
@@ -24,10 +24,10 @@ class LetterTokenizer:
         return "".join(chr(ord("a") + i % 26) for i in ids)
 
 
-def engine(tiny_qwen3, eos_token_ids=(), use_metal=False, **config) -> LLM:
+def engine(tiny_qwen3, eos_token_ids=(), use_cuda=False, **config) -> LLM:
     config.setdefault("num_blocks", 64)
     config.setdefault("block_size", 4)
-    return LLM(from_mlx(tiny_qwen3, use_metal), LetterTokenizer(eos_token_ids), EngineConfig(**config))
+    return LLM(from_hf(tiny_qwen3, use_cuda), LetterTokenizer(eos_token_ids), EngineConfig(**config))
 
 
 def assert_nothing_held(llm: LLM) -> None:
@@ -48,13 +48,13 @@ PROMPTS = [[1, 2, 3], [5], [7] * 9, [2, 4], [9, 8, 7, 6, 5], [1], list(range(30,
         {"num_blocks": 14, "max_batched_tokens": 16},
     ],
 )
-@with_and_without_metal
-def test_every_request_matches_running_it_alone(tiny_qwen3, config, use_metal):
-    llm = engine(tiny_qwen3, use_metal=use_metal, **config)
+@with_and_without_cuda
+def test_every_request_matches_running_it_alone(tiny_qwen3, config, use_cuda):
+    llm = engine(tiny_qwen3, use_cuda=use_cuda, **config)
     completions = llm.generate(PROMPTS, max_tokens=8)
 
-    # Against the dense loop on the pure-MLX model, so the kernels are checked too.
-    pure = from_mlx(tiny_qwen3)
+    # Against the dense loop on the pure-torch model, so the kernels are checked too.
+    pure = from_hf(tiny_qwen3)
     for prompt, completion in zip(PROMPTS, completions, strict=True):
         assert completion.token_ids == generate_with_kv_cache(pure, prompt, 8)
         assert completion.finish_reason == "length"
@@ -159,10 +159,10 @@ def test_abandoning_a_stream_releases_everything(tiny_qwen3):
     assert_nothing_held(llm)
 
 
-@with_and_without_metal
-def test_an_fp8_kv_cache_serves_to_completion(tiny_qwen3, use_metal):
-    llm = engine(tiny_qwen3, fp8_kv_cache=True, use_metal=use_metal)
-    assert llm.kv.keys[0].dtype == mx.uint8
+@with_and_without_cuda
+def test_an_fp8_kv_cache_serves_to_completion(tiny_qwen3, use_cuda):
+    llm = engine(tiny_qwen3, fp8_kv_cache=True, use_cuda=use_cuda)
+    assert llm.kv.keys[0].dtype == torch.uint8
     completions = llm.generate(PROMPTS, max_tokens=8)
     assert all(len(c.token_ids) == 8 for c in completions)
     # The kernels quantize the same bytes and dequantize in fp32, as this fp32 model's oracle does.
@@ -173,8 +173,8 @@ def test_an_fp8_kv_cache_serves_to_completion(tiny_qwen3, use_metal):
 
 @pytest.fixture(scope="module")
 def real_llm(real_qwen3):
-    mlx_model, tokenizer = real_qwen3
-    return LLM(from_mlx(mlx_model), tokenizer, EngineConfig(num_blocks=512))
+    hf_model, tokenizer = real_qwen3
+    return LLM(from_hf(hf_model), tokenizer, EngineConfig(num_blocks=512))
 
 
 def test_the_real_model_serves_text(real_llm):
@@ -194,10 +194,10 @@ def test_the_real_model_serves_text(real_llm):
 def test_default_pool_sizing_uses_the_memory_left(real_qwen3):
     from mini_vllm.engine import blocks_that_fit
 
-    model = from_mlx(real_qwen3[0])
+    model = from_hf(real_qwen3[0])
     c = model.config
     per_block = 2 * c.num_hidden_layers * 16 * c.num_key_value_heads * c.head_dim * 2
-    left = mx.device_info()["max_recommended_working_set_size"] - mx.get_active_memory()
+    left = torch.cuda.mem_get_info()[0]
 
     assert blocks_that_fit(model, EngineConfig(kv_fraction=0.1)) == int(left * 0.1) // per_block
     assert blocks_that_fit(model, EngineConfig(kv_fraction=0.1, fp8_kv_cache=True)) == int(left * 0.1) // (

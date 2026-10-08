@@ -1,56 +1,51 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(_ext LANGUAGES CXX)
+project(_ext LANGUAGES CXX CUDA)
 
-# ----------------------------- Setup -----------------------------
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # for clangd
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CUDA_ARCHITECTURES 120)
 
-option(BUILD_SHARED_LIBS "Build extensions as a shared library" ON)
-
-# ----------------------------- Dependencies -----------------------------
-find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+# Torch's own CMake config rejects this wheel toolkit: nvcc reports 13.2 while
+# cuda.h in the same wheels says 13.0. Take the include and library paths directly.
+if(NOT Python_EXECUTABLE)
+  find_package(Python 3.10 COMPONENTS Interpreter REQUIRED)
+endif()
 execute_process(
-  COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+  COMMAND "${Python_EXECUTABLE}" -c
+          "from torch.utils.cpp_extension import include_paths, library_paths; print('|'.join(include_paths())); print('|'.join(library_paths()))"
   OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE nanobind_ROOT)
-find_package(nanobind CONFIG REQUIRED)
+  OUTPUT_VARIABLE TORCH_PATHS
+  COMMAND_ERROR_IS_FATAL ANY)
+string(REPLACE "\n" ";" TORCH_PATHS "${TORCH_PATHS}")
+list(GET TORCH_PATHS 0 TORCH_INCLUDES_JOINED)
+list(GET TORCH_PATHS 1 TORCH_LIBRARIES_JOINED)
+string(REPLACE "|" ";" TORCH_INCLUDE_DIRS "${TORCH_INCLUDES_JOINED}")
+string(REPLACE "|" ";" TORCH_LIBRARY_DIRS "${TORCH_LIBRARIES_JOINED}")
 
-execute_process(
-  COMMAND "${Python_EXECUTABLE}" -m mlx --cmake-dir
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE MLX_ROOT)
-find_package(MLX CONFIG REQUIRED)
-
-# One .cpp (the MLX primitive and its dispatch) and one .metal (the kernels) per op.
 set(OPS rms_norm swiglu rope decode_attention flash_prefill paged_attention kv_quantize)
 
-# ----------------------------- Library -----------------------------
-add_library(mini_vllm_ext)
-list(TRANSFORM OPS PREPEND ${CMAKE_CURRENT_LIST_DIR}/src/ OUTPUT_VARIABLE OP_SOURCES)
-list(TRANSFORM OP_SOURCES APPEND .cpp)
-target_sources(mini_vllm_ext PRIVATE ${OP_SOURCES} ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp)
-target_include_directories(mini_vllm_ext PUBLIC ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/src)
-target_link_libraries(mini_vllm_ext PUBLIC mlx)
+add_library(_ext SHARED ${CMAKE_CURRENT_LIST_DIR}/bindings.cpp ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp)
+foreach(op ${OPS})
+  target_sources(_ext PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/${op}.cpp ${CMAKE_CURRENT_LIST_DIR}/src/${op}.cu)
+endforeach()
 
-# ----------------------------- Metal -----------------------------
-if(MLX_BUILD_METAL)
-  list(TRANSFORM OPS PREPEND ${CMAKE_CURRENT_LIST_DIR}/src/ OUTPUT_VARIABLE METAL_SOURCES)
-  list(TRANSFORM METAL_SOURCES APPEND .metal)
-  mlx_build_metallib(
-    TARGET mini_vllm_ext_metallib
-    TITLE mini_vllm_ext
-    SOURCES ${METAL_SOURCES}
-    INCLUDE_DIRS ${PROJECT_SOURCE_DIR} ${MLX_INCLUDE_DIRS}
-    OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
-  add_dependencies(mini_vllm_ext mini_vllm_ext_metallib)
-endif()
+target_include_directories(_ext PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/src
+  ${TORCH_INCLUDE_DIRS}
+  ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+target_link_directories(_ext PRIVATE ${TORCH_LIBRARY_DIRS} /usr/lib/wsl/lib)
+target_link_libraries(_ext PRIVATE c10 torch torch_cpu torch_cuda c10_cuda)
+target_compile_definitions(_ext PRIVATE _GLIBCXX_USE_CXX11_ABI=1 CCCL_DISABLE_CTK_COMPATIBILITY_CHECK)
+target_compile_options(_ext PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 
-# ----------------------------- Python bindings -----------------------------
-nanobind_add_module(_ext NB_STATIC STABLE_ABI LTO NOMINSIZE NB_DOMAIN mlx ${CMAKE_CURRENT_LIST_DIR}/bindings.cpp)
-target_link_libraries(_ext PRIVATE mini_vllm_ext)
-if(BUILD_SHARED_LIBS)
-  target_link_options(_ext PRIVATE -Wl,-rpath,@loader_path)
-endif()
+set_target_properties(_ext PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/mini_vllm_ext
+  PREFIX ""
+  OUTPUT_NAME "_ext"
+  BUILD_RPATH "$ORIGIN;${TORCH_LIBRARY_DIRS}"
+  INSTALL_RPATH "$ORIGIN;${TORCH_LIBRARY_DIRS}")

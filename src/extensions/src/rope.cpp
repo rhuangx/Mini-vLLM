@@ -1,46 +1,30 @@
-#include <algorithm>
-
 #include "mini_vllm_ext.h"
-#include "mlx/backend/metal/device.h"
 
 namespace mini_vllm_ext {
 
-mx::array rope(const mx::array &x, const mx::array &positions, const mx::array &cos, const mx::array &sin,
-               mx::StreamOrDevice s) {
-    return mx::array(x.shape(), x.dtype(), std::make_shared<RoPE>(mx::to_stream(s)),
-                     {mx::contiguous(x, false, s), mx::contiguous(mx::astype(positions, mx::int32, s), false, s),
-                      mx::contiguous(cos, false, s), mx::contiguous(sin, false, s)});
-}
+at::Tensor rope(const at::Tensor& x, const at::Tensor& positions, const at::Tensor& cos, const at::Tensor& sin) {
+  check_cuda(x, "x");
+  check_cuda(positions, "positions");
+  check_cuda(cos, "cos");
+  check_cuda(sin, "sin");
+  check_floating(x, "x");
+  TORCH_CHECK(x.dim() == 4, "rope x must be [B, L, H, D]");
+  TORCH_CHECK(x.size(-1) % 2 == 0, "rope head dim must be even");
+  TORCH_CHECK(positions.scalar_type() == at::kInt || positions.scalar_type() == at::kLong,
+              "positions must be int32 or int64");
+  TORCH_CHECK(cos.scalar_type() == at::kFloat && sin.scalar_type() == at::kFloat, "cos and sin tables must be fp32");
+  TORCH_CHECK(positions.dim() == 1 || positions.dim() == 2, "positions must be [L] or [B, L]");
 
-void RoPE::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    const auto &x = inputs[0];
-    const auto &positions = inputs[1];
-    auto &out = outputs[0];
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-
-    auto &d = mx::metal::device(stream().device);
-    auto kernel = d.get_kernel(kernel_name("rope", out.dtype()), d.get_library("mini_vllm_ext"));
-    auto &encoder = mx::metal::get_command_encoder(stream());
-    encoder.set_compute_pipeline_state(kernel);
-    for (int i = 0; i < 4; ++i) {
-        encoder.set_input_array(inputs[i], i);
-    }
-    encoder.set_output_array(out, 4);
-
-    const int length = x.shape()[1];
-    const int heads = x.shape()[2];
-    const int head_dim = x.shape()[3];
-    // positions is [L], shared by every batch row, or [B, L], one row each.
-    const int position_stride = positions.ndim() == 1 ? 0 : length;
-    encoder.set_bytes(length, 5);
-    encoder.set_bytes(heads, 6);
-    encoder.set_bytes(head_dim, 7);
-    encoder.set_bytes(position_stride, 8);
-
-    // One thread per rotated pair (i, i + D/2) of one head of one token.
-    const uint pairs = x.size() / 2;
-    const size_t threads = std::min<size_t>(pairs, kernel->maxTotalThreadsPerThreadgroup());
-    encoder.dispatch_threads(MTL::Size(pairs, 1, 1), MTL::Size(threads, 1, 1));
+  const at::Tensor input = x.contiguous();
+  const at::Tensor position_ids = positions.to(at::kInt).contiguous();
+  const at::Tensor cos_table = cos.contiguous();
+  const at::Tensor sin_table = sin.contiguous();
+  at::Tensor out = at::empty(input.sizes(), input.options());
+  if (input.numel() == 0) {
+    return out;
+  }
+  launch_rope(input, position_ids, cos_table, sin_table, out);
+  return out;
 }
 
 }  // namespace mini_vllm_ext
