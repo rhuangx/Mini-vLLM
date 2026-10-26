@@ -21,10 +21,6 @@ def silu(x: torch.Tensor) -> torch.Tensor:
     return x * torch.sigmoid(x)
 
 
-def swiglu(gate: torch.Tensor, up: torch.Tensor, use_cuda: bool = False) -> torch.Tensor:
+def swiglu(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     """silu(gate) * up: the MLP's two up-projections merged before the down-projection."""
-    if use_cuda:
-        import mini_vllm_ext
-
-        return mini_vllm_ext.swiglu(gate, up)
     return silu(gate) * up

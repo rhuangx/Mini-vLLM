@@ -54,11 +54,11 @@ def main() -> None:
         hf_model, tokenizer = load_hf(args.model)
         rows = {concurrency: {} for concurrency in args.concurrency}
 
-        for label, use_cuda in variants():
+        for label, backend in variants():
             for concurrency in args.concurrency:
                 # Twice the requests there are slots, so finished requests are replaced mid-run.
                 prompts = random_prompts(2 * concurrency, args.prompt_lens, len(tokenizer.vocab))
-                llm = engine(hf_model, tokenizer, use_cuda, num_blocks=2048, max_sequences=concurrency)
+                llm = engine(hf_model, tokenizer, backend, num_blocks=2048, max_sequences=concurrency)
                 print(f"{label}, concurrency {concurrency}", flush=True)
                 start = time.perf_counter()
                 completions = llm.generate(prompts, max_tokens=args.max_tokens)

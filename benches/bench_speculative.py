@@ -2,8 +2,9 @@
 tokens per step for the target to verify. It pays only when the draft is accepted often and
 costs much less than the target, and a self-draft cannot be both.
 
-    uv run python benches/bench_speculative.py --cuda
-    uv run python benches/bench_speculative.py --cuda --model Qwen/Qwen3-1.7B --draft-model Qwen/Qwen3-0.6B
+    uv run python benches/bench_speculative.py --backend cuda
+    uv run python benches/bench_speculative.py --backend cuda \
+        --model Qwen/Qwen3-1.7B --draft-model Qwen/Qwen3-0.6B
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ from mini_vllm import DEFAULT_MODEL
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--cuda", action="store_true", help="run on the CUDA kernels in src/extensions/")
+    parser.add_argument("--backend", choices=["torch", "cuda"], default="torch",
+                        help="cuda runs the kernels in src/extensions/")
     parser.add_argument("--draft-model", help="a separate, smaller checkpoint sharing the tokenizer")
     parser.add_argument("--draft-layers", type=int, nargs="+", default=[4, 14, 28],
                         help="self-draft depths: the target's first N layers")
@@ -30,7 +32,7 @@ def main() -> None:
     args = parser.parse_args()
 
     title = (f"Speculative decoding: k={args.k}, {len(PROMPTS)} greedy requests of "
-             f"{args.max_tokens} tokens, one at a time, {'cuda' if args.cuda else 'pure'}")
+             f"{args.max_tokens} tokens, one at a time, {args.backend}")
     with evidence(title):
         hf_model, tokenizer = load_hf(args.model)
         layers = hf_model.config.num_hidden_layers
@@ -48,7 +50,7 @@ def main() -> None:
         baseline = None
         labels, seconds_by_draft, tokens_per_pass = [], [], []
         for label, config in drafts:
-            llm = engine(hf_model, tokenizer, args.cuda, num_blocks=256, **config)
+            llm = engine(hf_model, tokenizer, args.backend, num_blocks=256, **config)
             if llm.spec is not None:
                 llm.spec.stats.__init__()  # forget the warm-up
             start = time.perf_counter()

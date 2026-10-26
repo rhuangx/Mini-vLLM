@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from utils import DTYPES, assert_allclose, requires_cuda
 
 from mini_vllm.layers.activation import silu, softmax, swiglu
+from mini_vllm.layers.backends import get_backend
 from mini_vllm.layers.linear import linear
 
 
@@ -47,6 +48,6 @@ def test_softmax_is_stable_at_large_logits():
 def test_the_swiglu_kernel_matches_the_oracle(dtype):
     gate = (4 * torch.randn(5, 3072, device="cuda")).to(dtype)
     up = torch.randn(5, 3072, device="cuda", dtype=dtype)
-    assert_allclose(swiglu(gate, up, use_cuda=True), swiglu(gate, up))
+    assert_allclose(get_backend("cuda").swiglu(gate, up), swiglu(gate, up))
     # A transposed view is made contiguous before the kernel reads it.
-    assert_allclose(swiglu(gate.T, up.T, use_cuda=True), swiglu(gate.T, up.T))
+    assert_allclose(get_backend("cuda").swiglu(gate.T, up.T), swiglu(gate.T, up.T))

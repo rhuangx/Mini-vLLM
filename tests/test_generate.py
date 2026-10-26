@@ -2,7 +2,7 @@
 
 import pytest
 import torch
-from utils import with_and_without_cuda
+from utils import with_each_backend
 
 from mini_vllm.reference.generate import generate_with_kv_cache, simple_generate
 from mini_vllm.reference.kv_cache import KvFullCache
@@ -45,13 +45,13 @@ def hf_greedy(model, prompt: list[int], max_tokens: int) -> list[int]:
     return continuation
 
 
-@with_and_without_cuda
+@with_each_backend
 @pytest.mark.parametrize("prefill_chunk", [None, 1, 3])
-def test_the_generation_loops_agree(tiny_qwen3, prefill_chunk, use_cuda):
+def test_the_generation_loops_agree(tiny_qwen3, prefill_chunk, backend):
     """The quadratic loop and the cached loop, token-identical; the cached loop also runs
     on the kernels, against the pure quadratic one."""
     prompt = torch.randint(0, 512, (7,), device="cuda").tolist()
-    cached = generate_with_kv_cache(from_hf(tiny_qwen3, use_cuda), prompt, 12, prefill_chunk=prefill_chunk)
+    cached = generate_with_kv_cache(from_hf(tiny_qwen3, backend), prompt, 12, prefill_chunk=prefill_chunk)
     assert cached == simple_generate(from_hf(tiny_qwen3), prompt, 12)
 
 
@@ -66,13 +66,13 @@ def test_generation_stops_at_an_eos_token(tiny_qwen3):
     assert simple_generate(model, prompt, 12, eos_token_ids={stop}) == expected
 
 
-@with_and_without_cuda
-def test_greedy_choices_match_transformers_away_from_bf16_ties(real_qwen3, use_cuda):
+@with_each_backend
+def test_greedy_choices_match_transformers_away_from_bf16_ties(real_qwen3, backend):
     """Teacher-forced along the HF greedy output, so both models see the same context at every
     step: wherever HF's top token wins by more than a bf16 tie, ours must pick it too. With
     the kernels, prompts over 8 tokens take flash_prefill and every decode step decode_attention."""
     reference, tokenizer = real_qwen3
-    model = from_hf(reference, use_cuda)
+    model = from_hf(reference, backend)
     device = reference.device
     decided = 0
 

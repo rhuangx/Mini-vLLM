@@ -8,6 +8,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from mini_vllm.config import ModelConfig
+from mini_vllm.layers.backends import Backend, get_backend
 from mini_vllm.layers.embedding_head import Embedding
 from mini_vllm.layers.layernorm import RMSNorm
 from mini_vllm.layers.rotary_embedding import RoPE
@@ -24,19 +25,20 @@ def _frozen(weight: torch.Tensor) -> torch.Tensor:
     return weight.detach()
 
 
-def from_hf(hf_model: Any, use_cuda: bool = False) -> Qwen3Model:
+def from_hf(hf_model: Any, backend: str | Backend = "torch") -> Qwen3Model:
     """Read every weight off a transformers Qwen3ForCausalLM; nothing of it runs after this.
-    use_cuda routes every operator with a kernel through src/extensions/. The attribute paths
+    backend says where the operators run: "torch", or "cuda" for src/extensions/. The attribute paths
     match Qwen3ForCausalLM, and a tied checkpoint leaves lm_head as None. The weights are the
     module's own tensors, shared by reference."""
     config = ModelConfig.from_hf_config(hf_model.config)
+    backend = get_backend(backend)
     device = hf_model.model.embed_tokens.weight.device
 
     def norm(dim: int, weight: torch.Tensor) -> RMSNorm:
-        return RMSNorm(dim, weight, config.rms_norm_eps, use_cuda)
+        return RMSNorm(dim, weight, config.rms_norm_eps, backend)
 
     # One set of rotary tables, shared by every layer, on the same device as the weights.
-    rope = RoPE(config.head_dim, config.max_position_embeddings, config.rope_theta, use_cuda, device=device)
+    rope = RoPE(config.head_dim, config.max_position_embeddings, config.rope_theta, backend, device=device)
 
     layers = []
     for layer in hf_model.model.layers:
@@ -50,7 +52,7 @@ def from_hf(hf_model: Any, use_cuda: bool = False) -> Qwen3Model:
             norm(config.head_dim, _frozen(attn.q_norm.weight)),
             norm(config.head_dim, _frozen(attn.k_norm.weight)),
             rope,
-            use_cuda,
+            backend,
         )
         layers.append(
             Qwen3TransformerBlock(
@@ -59,7 +61,7 @@ def from_hf(hf_model: Any, use_cuda: bool = False) -> Qwen3Model:
                     _frozen(mlp.gate_proj.weight),
                     _frozen(mlp.up_proj.weight),
                     _frozen(mlp.down_proj.weight),
-                    use_cuda,
+                    backend,
                 ),
                 norm(config.hidden_size, _frozen(layer.input_layernorm.weight)),
                 norm(config.hidden_size, _frozen(layer.post_attention_layernorm.weight)),
@@ -77,13 +79,13 @@ def from_hf(hf_model: Any, use_cuda: bool = False) -> Qwen3Model:
     )
 
 
-def load(model: str = DEFAULT_MODEL, use_cuda: bool = False) -> tuple[Qwen3Model, Tokenizer]:
+def load(model: str = DEFAULT_MODEL, backend: str | Backend = "torch") -> tuple[Qwen3Model, Tokenizer]:
     """Load a BF16 Qwen3 checkpoint from the Hugging Face hub: (model, tokenizer)."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     hf_model = AutoModelForCausalLM.from_pretrained(model, dtype=torch.bfloat16).to(device)
     hf_tokenizer = AutoTokenizer.from_pretrained(model)
     tokenizer = Tokenizer(hf_tokenizer, eos_token_ids(hf_model, hf_tokenizer))
-    qwen3 = from_hf(hf_model, use_cuda)
+    qwen3 = from_hf(hf_model, backend)
     # The transplanted weights keep the storage alive; the module itself is not needed.
     del hf_model
     return qwen3, tokenizer

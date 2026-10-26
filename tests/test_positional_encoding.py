@@ -82,7 +82,7 @@ def test_positions_are_explicit_not_assumed():
 def test_the_rope_kernel_matches_the_oracle(dtype, per_row):
     """The kernel gathers the same fp32 tables, so even far positions agree to rounding."""
     rope = RoPE(head_dim=128, max_seq_len=40_000, theta=THETA, device=torch.device("cuda"))
-    cuda = RoPE(head_dim=128, max_seq_len=40_000, theta=THETA, use_cuda=True, device=torch.device("cuda"))
+    cuda = RoPE(head_dim=128, max_seq_len=40_000, theta=THETA, backend="cuda", device=torch.device("cuda"))
     x = torch.randn(2, 7, 4, 128, device="cuda").to(dtype)
     far = torch.tensor([[39_000 + 3 * i + b for i in range(7)] for b in range(2)], device="cuda")
     positions = far if per_row else torch.arange(5, 12, device="cuda")

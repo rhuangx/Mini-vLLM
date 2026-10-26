@@ -9,6 +9,7 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 from utils import DTYPES, assert_allclose, requires_cuda
 
 from mini_vllm.layers.attention import causal_mask, paged_attention, scaled_dot_product_attention_grouped
+from mini_vllm.layers.backends import get_backend
 from mini_vllm.layers.quantization import dequantize_fp8, quantize_fp8
 
 HEAD_DIM = 64
@@ -188,7 +189,7 @@ def dense_qkv(dtype, query_len, source_len, head_dim, spread=1.0, device="cuda")
 def test_decode_attention_matches_the_oracle(dtype, query_len, source_len, mask, head_dim):
     q, k, v = dense_qkv(dtype, query_len, source_len, head_dim)
     assert_allclose(
-        scaled_dot_product_attention_grouped(q, k, v, mask=mask, use_cuda=True),
+        get_backend("cuda").dense_attention(q, k, v, mask=mask),
         scaled_dot_product_attention_grouped(q, k, v, mask=mask),
     )
 
@@ -206,7 +207,7 @@ def test_flash_prefill_is_as_accurate_as_the_oracle(query_len, source_len, mask)
         return (torch.linalg.norm(out.float() - exact) / torch.linalg.norm(exact)).item()
 
     oracle = relative(scaled_dot_product_attention_grouped(q, k, v, mask=mask))
-    assert relative(scaled_dot_product_attention_grouped(q, k, v, mask=mask, use_cuda=True)) < 1.1 * oracle
+    assert relative(get_backend("cuda").dense_attention(q, k, v, mask=mask)) < 1.1 * oracle
 
 
 @requires_cuda
@@ -214,7 +215,7 @@ def test_an_additive_mask_takes_the_pure_path():
     q, k, v = dense_qkv(torch.float32, 5, 9, 64)
     mask = torch.randn(5, 9, device="cuda")
     assert torch.equal(
-        scaled_dot_product_attention_grouped(q, k, v, mask=mask, use_cuda=True),
+        get_backend("cuda").dense_attention(q, k, v, mask=mask),
         scaled_dot_product_attention_grouped(q, k, v, mask=mask),
     )
 
@@ -237,7 +238,7 @@ def test_online_softmax_survives_a_spike_and_overflow(where, query_len):
     one query token takes decode_attention, 40 take flash_prefill, and all take the paged kernel."""
     for case in (spiked(query_len, 64, where), dense_qkv(torch.float32, query_len, 64, 128, spread=30.0)):
         q, k, v = (x.bfloat16() for x in case)
-        dense = scaled_dot_product_attention_grouped(q, k, v, use_cuda=True)
+        dense = get_backend("cuda").dense_attention(q, k, v)
         assert torch.all(torch.isfinite(dense))
         assert_allclose(dense, scaled_dot_product_attention_grouped(q, k, v))
 
@@ -250,7 +251,7 @@ def test_online_softmax_survives_a_spike_and_overflow(where, query_len):
             torch.tensor([0, query_len], dtype=torch.int32, device="cuda"),
             torch.tensor([64], dtype=torch.int32, device="cuda"),
         )
-        paged = paged_attention(*args, use_cuda=True)
+        paged = get_backend("cuda").paged_attention(*args)
         assert torch.all(torch.isfinite(paged))
         assert_allclose(paged, paged_attention(*args))
 
@@ -269,7 +270,7 @@ def test_the_paged_kernel_matches_the_oracle_and_never_reads_padding(dtype, ragg
     _, q, key_pages, value_pages, tables, starts, contexts = build_paged_batch(
         dtype, float("nan"), ragged, device="cuda"
     )
-    got = paged_attention(q, key_pages, value_pages, tables, starts, contexts, use_cuda=True)
+    got = get_backend("cuda").paged_attention(q, key_pages, value_pages, tables, starts, contexts)
     assert torch.all(torch.isfinite(got))
     assert_allclose(got, paged_attention(q, key_pages, value_pages, tables, starts, contexts))
 
@@ -287,7 +288,7 @@ def test_the_paged_kernel_reads_fp8_pages():
     value_bits = torch.where(unused, 0x7F, quantize_fp8(value_pages, v_scale)).to(torch.uint8)
     args = (q, key_bits, value_bits, tables, starts, contexts)
 
-    got = paged_attention(*args, k_scale=k_scale, v_scale=v_scale, use_cuda=True)
+    got = get_backend("cuda").paged_attention(*args, k_scale=k_scale, v_scale=v_scale)
     oracle = paged_attention(*args, k_scale=k_scale, v_scale=v_scale)
     exact = paged_attention(q.float(), *args[1:], k_scale=k_scale, v_scale=v_scale)
 

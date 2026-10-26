@@ -4,13 +4,27 @@ from __future__ import annotations
 
 import torch
 
-__all__ = ["RoPE", "rotate_half"]
+from mini_vllm.layers.backends import Backend, get_backend
+
+__all__ = ["RoPE", "apply_rope", "rotate_half"]
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
     """[x1, x2] -> [-x2, x1], pairing element i with element i + D/2 as Qwen3 was trained."""
     half = x.shape[-1] // 2
     return torch.cat([-x[..., half:], x[..., :half]], dim=-1)
+
+
+def apply_rope(
+    x: torch.Tensor, positions: torch.Tensor, cos_table: torch.Tensor, sin_table: torch.Tensor
+) -> torch.Tensor:
+    """Rotate x [B, L, H, D] by the fp32 table rows at positions [L] or [B, L]."""
+    # The head axis is inserted so one table row applies to every head of its token.
+    cos = cos_table[positions.long()].unsqueeze(-2)
+    sin = sin_table[positions.long()].unsqueeze(-2)
+
+    x32 = x.float()
+    return (x32 * cos + rotate_half(x32) * sin).to(x.dtype)
 
 
 class RoPE:
@@ -21,10 +35,10 @@ class RoPE:
         head_dim: int,
         max_seq_len: int,
         theta: float = 1_000_000.0,
-        use_cuda: bool = False,
+        backend: str | Backend = "torch",
         device: torch.device | None = None,
     ) -> None:
-        self.use_cuda = use_cuda
+        self.backend = get_backend(backend)
         self.head_dim = head_dim
         self.max_seq_len = max_seq_len
         self.theta = theta
@@ -51,15 +65,4 @@ class RoPE:
 
     def __call__(self, x: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         cos_table, sin_table = self._tables(x.device)
-        if self.use_cuda:
-            import mini_vllm_ext
-
-            # The same fp32 tables, gathered in the kernel.
-            return mini_vllm_ext.rope(x, positions, cos_table, sin_table)
-
-        # The head axis is inserted so one table row applies to every head of its token.
-        cos = cos_table[positions.long()].unsqueeze(-2)
-        sin = sin_table[positions.long()].unsqueeze(-2)
-
-        x32 = x.float()
-        return (x32 * cos + rotate_half(x32) * sin).to(x.dtype)
+        return self.backend.rope(x, positions, cos_table, sin_table)

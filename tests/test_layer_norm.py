@@ -37,7 +37,7 @@ def test_the_rms_norm_kernel_matches_the_oracle(dtype, dim):
     so a fraction of outputs move by an ulp."""
     weight = (1 + 0.1 * torch.randn(dim, device="cuda")).to(dtype)
     x = (3 * torch.randn(4, 3, dim, device="cuda")).to(dtype)
-    norm, cuda = RMSNorm(dim, weight), RMSNorm(dim, weight, use_cuda=True)
+    norm, cuda = RMSNorm(dim, weight), RMSNorm(dim, weight, backend="cuda")
     for rows in (x, x.transpose(0, 1)):  # contiguous, then a strided view
         if dtype == torch.float32:
             assert_allclose(cuda(rows), norm(rows))

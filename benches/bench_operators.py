@@ -18,6 +18,7 @@ from mini_vllm.engine.kv_cache import PagedKvPool
 from mini_vllm.layers.activation import swiglu
 from mini_vllm.layers.attention import paged_attention
 from mini_vllm.layers.attention import scaled_dot_product_attention_grouped as sdpa
+from mini_vllm.layers.backends import get_backend
 from mini_vllm.layers.layernorm import RMSNorm
 from mini_vllm.layers.rotary_embedding import RoPE
 
@@ -48,7 +49,7 @@ def cases() -> list[tuple[str, int, object, object, object | None]]:
         out.append((
             f"rms_norm [{rows}, {HIDDEN}]", 2 * x.nbytes,
             lambda x=x, w=w: RMSNorm(HIDDEN, w)(x),
-            lambda x=x, w=w: RMSNorm(HIDDEN, w, use_cuda=True)(x),
+            lambda x=x, w=w: RMSNorm(HIDDEN, w, backend="cuda")(x),
             lambda x=x, w=w: F.rms_norm(x, (HIDDEN,), w, 1e-6),
         ))
 
@@ -56,12 +57,13 @@ def cases() -> list[tuple[str, int, object, object, object | None]]:
         out.append((
             f"swiglu [{rows}, {INTERMEDIATE}]", 3 * gate.nbytes,
             lambda g=gate, u=up: swiglu(g, u),
-            lambda g=gate, u=up: swiglu(g, u, use_cuda=True),
+            lambda g=gate, u=up: get_backend("cuda").swiglu(g, u),
             lambda g=gate, u=up: F.silu(g) * u,
         ))
 
         device = torch.device(DEVICE)
-        pure, cuda = RoPE(HEAD_DIM, 4096, device=device), RoPE(HEAD_DIM, 4096, use_cuda=True, device=device)
+        pure = RoPE(HEAD_DIM, 4096, device=device)
+        cuda = RoPE(HEAD_DIM, 4096, backend="cuda", device=device) if CUDA_BUILT else None
         q, positions = normal(1, rows, Q_HEADS, HEAD_DIM), torch.arange(1000, 1000 + rows, device=DEVICE)
         out.append((
             f"rope [1, {rows}, {Q_HEADS}, {HEAD_DIM}]", 2 * q.nbytes,
@@ -76,7 +78,7 @@ def cases() -> list[tuple[str, int, object, object, object | None]]:
         out.append((
             f"{name} L={length} S={context}", 2 * q.nbytes + k.nbytes + v.nbytes,
             lambda q=q, k=k, v=v: sdpa(q, k, v, mask="causal"),
-            lambda q=q, k=k, v=v: sdpa(q, k, v, mask="causal", use_cuda=True),
+            lambda q=q, k=k, v=v: get_backend("cuda").dense_attention(q, k, v, mask="causal"),
             lambda q=q, k=k, v=v: torch_attention(q, k, v),
         ))
 
@@ -102,7 +104,7 @@ def cases() -> list[tuple[str, int, object, object, object | None]]:
         out.append((
             f"paged_attention, {label}", 2 * query.nbytes + read,
             lambda args=args: paged_attention(*args),
-            lambda args=args: paged_attention(*args, use_cuda=True),
+            lambda args=args: get_backend("cuda").paged_attention(*args),
             None,
         ))
 
@@ -111,14 +113,14 @@ def cases() -> list[tuple[str, int, object, object, object | None]]:
     for fp8 in (False, True):
         pool = PagedKvPool(1, 2048, 16, KV_HEADS, HEAD_DIM, dtype=BF16, device=DEVICE, fp8=fp8)
 
-        def write_once(use_cuda: bool, pool: PagedKvPool = pool) -> None:
-            pool.write(0, slots, kv, kv, use_cuda)
+        def write_once(backend: str, pool: PagedKvPool = pool) -> None:
+            pool.write(0, slots, kv, kv, backend)
 
         out.append((
             f"{'fp8 ' if fp8 else ''}cache write, 32 tokens into 2048 pages",
             kv.nbytes * (3 if fp8 else 4),
-            lambda write_once=write_once: write_once(False),
-            lambda write_once=write_once: write_once(True),
+            lambda write_once=write_once: write_once("torch"),
+            lambda write_once=write_once: write_once("cuda"),
             None,
         ))
     return out

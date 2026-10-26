@@ -68,8 +68,8 @@ def main() -> None:
         prompts = random_prompts(len(args.prompt_lens), args.prompt_lens, len(tokenizer.vocab))
 
         results = {}
-        for label, use_cuda in variants():
-            llm = engine(hf_model, tokenizer, use_cuda, num_blocks=512)
+        for label, backend in variants():
+            llm = engine(hf_model, tokenizer, backend, num_blocks=512)
             for prompt in prompts:
                 runs = [token_times(llm.generate_stream(prompt, max_tokens=args.max_tokens))[0]
                         for _ in range(args.repeats)]

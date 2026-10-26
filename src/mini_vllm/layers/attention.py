@@ -9,7 +9,7 @@ import torch
 from mini_vllm.layers.activation import softmax
 from mini_vllm.layers.quantization import dequantize_fp8
 
-__all__ = ["causal_mask", "paged_attention", "scaled_dot_product_attention_grouped"]
+__all__ = ["causal_mask", "gather_pages", "paged_attention", "scaled_dot_product_attention_grouped"]
 
 
 def causal_mask(
@@ -36,14 +36,9 @@ def scaled_dot_product_attention_grouped(
     value: torch.Tensor,
     scale: float | None = None,
     mask: torch.Tensor | str | None = None,
-    use_cuda: bool = False,
 ) -> torch.Tensor:
     """query is B x H_q x L x D, key and value are B x H_k x S x D; mask is "causal" or
-    additive and broadcastable to B x H_q x L x S.
-
-    With use_cuda, a causal or unmasked call goes to decode_attention for a few query
-    tokens, or to flash_prefill for a bf16, D = 128 prefill; anything else runs below.
-    """
+    additive and broadcastable to B x H_q x L x S."""
     *batch, num_query_heads, query_len, head_dim = query.shape
     num_kv_heads, source_len = key.shape[-3], key.shape[-2]
     group_size = num_query_heads // num_kv_heads
@@ -51,15 +46,6 @@ def scaled_dot_product_attention_grouped(
 
     if scale is None:
         scale = 1.0 / math.sqrt(head_dim)
-
-    if use_cuda and not isinstance(mask, torch.Tensor):
-        import mini_vllm_ext
-
-        causal = mask == "causal"
-        if query_len <= 8:
-            return mini_vllm_ext.decode_attention(query, key, value, scale, causal)
-        if query.dtype == torch.bfloat16 and head_dim == 128:
-            return mini_vllm_ext.flash_prefill(query, key, value, scale, causal)
 
     # Scores, softmax and the weighted sum stay fp32: a bf16 score near 10 is only good to
     # 0.06, which is enough to flip Qwen3-0.6B's greedy choice.
@@ -83,6 +69,31 @@ def scaled_dot_product_attention_grouped(
     return out.reshape(*batch, num_query_heads, query_len, head_dim).to(dtype)
 
 
+def gather_pages(
+    key_pages: torch.Tensor,
+    value_pages: torch.Tensor,
+    block_table: torch.Tensor,
+    context_len: int,
+    k_scale: float,
+    v_scale: float,
+    dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """One sequence's keys and values, S x H_k x D, read out of its pages and dequantized if
+    they are fp8. block_table is that sequence's row of the device table."""
+    block_size, num_kv_heads, head_dim = key_pages.shape[1:]
+    blocks_used = -(-context_len // block_size)
+    # Slice the device table: gathering from a host list would copy it back to the device.
+    ids = block_table[:blocks_used].long()
+    keys = key_pages[ids].reshape(-1, num_kv_heads, head_dim)[:context_len]
+    values = value_pages[ids].reshape(-1, num_kv_heads, head_dim)[:context_len]
+
+    # Dequantize only the pages this sequence reads, never the whole pool.
+    if key_pages.dtype == torch.uint8:
+        keys = dequantize_fp8(keys, k_scale, dtype)
+        values = dequantize_fp8(values, v_scale, dtype)
+    return keys, values
+
+
 def paged_attention(
     query: torch.Tensor,
     key_pages: torch.Tensor,
@@ -93,7 +104,6 @@ def paged_attention(
     scale: float | None = None,
     k_scale: float = 1.0,
     v_scale: float = 1.0,
-    use_cuda: bool = False,
     host: tuple[list[list[int]], list[int], list[int]] | None = None,
 ) -> torch.Tensor:
     """Causal grouped attention over a paged cache, gathering each sequence's pages first.
@@ -103,77 +113,25 @@ def paged_attention(
     context_lens (N).
 
     host, when the caller already has them, is (block tables, query starts, context lengths)
-    as Python lists. The pure path and the kernel routing read those instead of .tolist(),
-    which would sync the device once per list. Direct calls omit it and fall back.
-
-    With use_cuda, the sequences computing at most 8 tokens (decodes) go to one paged
-    kernel that walks the block tables itself. It gives each query token a thread block, so a
-    long chunk would re-read its whole context once per token: those gather their pages and
-    take the dense kernels instead.
+    as Python lists, read instead of .tolist(), which would sync the device once per list.
+    Direct calls omit it and fall back.
     """
-    is_fp8 = key_pages.dtype == torch.uint8
     if scale is None:
         scale = query.shape[-1] ** -0.5
+    starts, lengths = (cu_seqlens_q.tolist(), context_lens.tolist()) if host is None else host[1:]
 
-    if host is None:
-        starts = cu_seqlens_q.tolist()
-        lengths = context_lens.tolist()
-    else:
-        starts, lengths = host[1], host[2]
-
-    short = [i for i in range(len(lengths)) if starts[i + 1] - starts[i] <= 8] if use_cuda else []
-    pieces = {}
-    if short:
-        import mini_vllm_ext
-
-        if len(short) == len(lengths):
-            pages = (key_pages, value_pages, block_tables, cu_seqlens_q, context_lens)
-            return mini_vllm_ext.paged_attention(query, *pages, scale, k_scale, v_scale)
-        # A mixed batch: the decodes as one sub-batch, whose rows are split back out below.
-        rows = [row for i in short for row in range(starts[i], starts[i + 1])]
-        sub_starts = [0]
-        for i in short:
-            sub_starts.append(sub_starts[-1] + starts[i + 1] - starts[i])
-        chosen = torch.tensor(short, dtype=torch.long, device=block_tables.device)
-        attended = mini_vllm_ext.paged_attention(
-            query[torch.tensor(rows, dtype=torch.long, device=query.device)],
-            key_pages,
-            value_pages,
-            block_tables[chosen],
-            torch.tensor(sub_starts, dtype=torch.int32, device=query.device),
-            context_lens[chosen],
-            scale,
-            k_scale,
-            v_scale,
-        )
-        pieces = {i: attended[sub_starts[j] : sub_starts[j + 1]] for j, i in enumerate(short)}
-
-    block_size, num_kv_heads, head_dim = key_pages.shape[1:]
     outputs = []
-
     for index, context_len in enumerate(lengths):
-        if index in pieces:
-            outputs.append(pieces[index])
-            continue
         start, end = starts[index], starts[index + 1]
-        blocks_used = -(-context_len // block_size)
-        # Slice the device table: gathering from a host list would copy it back to the device.
-        ids = block_tables[index, :blocks_used].long()
-        keys = key_pages[ids].reshape(-1, num_kv_heads, head_dim)[:context_len]
-        values = value_pages[ids].reshape(-1, num_kv_heads, head_dim)[:context_len]
-
-        # Dequantize only the pages this sequence reads, never the whole pool.
-        if is_fp8:
-            keys = dequantize_fp8(keys, k_scale, query.dtype)
-            values = dequantize_fp8(values, v_scale, query.dtype)
-
+        keys, values = gather_pages(
+            key_pages, value_pages, block_tables[index], context_len, k_scale, v_scale, query.dtype
+        )
         attended = scaled_dot_product_attention_grouped(
             query[start:end].transpose(0, 1),  # H_q x L x D
             keys.transpose(0, 1),              # H_k x S x D
             values.transpose(0, 1),
             scale=scale,
             mask="causal",
-            use_cuda=use_cuda,
         )
         outputs.append(attended.transpose(0, 1))
 

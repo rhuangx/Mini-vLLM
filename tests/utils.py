@@ -24,10 +24,10 @@ OP_TOLERANCES = {
 }
 
 
-# Runs a test on the pure-torch path and, once the extension is built, on the kernels too.
+# Runs a test on every backend: pure PyTorch, and the CUDA kernels once the extension is built.
 _UNBUILT = pytest.mark.skipif(not CUDA_BUILT, reason="build src/extensions first")
-with_and_without_cuda = pytest.mark.parametrize(
-    "use_cuda", [False, pytest.param(True, id="cuda", marks=[pytest.mark.cuda, _UNBUILT])]
+with_each_backend = pytest.mark.parametrize(
+    "backend", ["torch", pytest.param("cuda", marks=[pytest.mark.cuda, _UNBUILT])]
 )
 
 
@@ -60,10 +60,10 @@ class LetterTokenizer:
         return "".join(chr(ord("a") + i % 26) for i in ids)
 
 
-def engine(tiny_qwen3, eos_token_ids=(), use_cuda=False, **config) -> LLM:
+def engine(tiny_qwen3, eos_token_ids=(), backend="torch", **config) -> LLM:
     config.setdefault("num_blocks", 64)
     config.setdefault("block_size", 4)
-    return LLM(from_hf(tiny_qwen3, use_cuda), LetterTokenizer(eos_token_ids), EngineConfig(**config))
+    return LLM(from_hf(tiny_qwen3, backend), LetterTokenizer(eos_token_ids), EngineConfig(**config))
 
 
 def assert_nothing_held(llm: LLM) -> None:

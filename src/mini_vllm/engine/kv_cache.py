@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from mini_vllm.layers.attention import paged_attention
-from mini_vllm.layers.quantization import quantize_fp8
+from mini_vllm.layers.backends import Backend, get_backend
 
 if TYPE_CHECKING:
     from mini_vllm.engine.forward_batch import ForwardBatch
@@ -56,28 +55,13 @@ class PagedKvPool:
         slot_mapping: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        use_cuda: bool = False,
+        backend: str | Backend = "torch",
     ) -> None:
-        """Scatter key/value [T, H_k, D] into the slots slot_mapping names.
-
-        The write is in place: index_copy_ on the pure path, and the CUDA kernels, which
-        quantize to fp8 in the same pass and do not rebind the pool tensors.
-        """
-        if use_cuda:
-            import mini_vllm_ext
-
-            if self.fp8:
-                mini_vllm_ext.kv_quantize_scatter(self.keys[layer], slot_mapping, key, self.k_scale)
-                mini_vllm_ext.kv_quantize_scatter(self.values[layer], slot_mapping, value, self.v_scale)
-            else:
-                mini_vllm_ext.paged_cache_update(self.keys[layer], slot_mapping, key)
-                mini_vllm_ext.paged_cache_update(self.values[layer], slot_mapping, value)
-            return
-        if self.fp8:
-            key, value = quantize_fp8(key, self.k_scale), quantize_fp8(value, self.v_scale)
-        slots = slot_mapping.long()
-        self.keys[layer].index_copy_(0, slots, key.to(self.keys[layer].dtype))
-        self.values[layer].index_copy_(0, slots, value.to(self.values[layer].dtype))
+        """Scatter key/value [T, H_k, D] into the slots slot_mapping names, in place, so the
+        pool tensors are never rebound; fp8 pools quantize on the way in."""
+        backend = get_backend(backend)
+        backend.write_kv(self.keys[layer], slot_mapping, key, self.k_scale if self.fp8 else None)
+        backend.write_kv(self.values[layer], slot_mapping, value, self.v_scale if self.fp8 else None)
 
     def pages(self, layer: int) -> tuple[torch.Tensor, torch.Tensor]:
         """One layer's keys and values as num_blocks x P x H_k x D."""
@@ -107,21 +91,21 @@ class PagedKvCache:
         self.batch = batch
 
     def attend(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, use_cuda: bool = False
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, backend: str | Backend = "torch"
     ) -> torch.Tensor:
         """Write this batch's keys and values into their slots, then attend each sequence
         over its own pages."""
-        pool, batch = self.pool, self.batch
+        pool, batch, backend = self.pool, self.batch, get_backend(backend)
         # k, v arrive as 1 x H_k x T x D; the pool wants T x H_k x D, contiguous.
         pool.write(
             self.layer,
             batch.slot_mapping,
             k[0].transpose(0, 1).contiguous(),
             v[0].transpose(0, 1).contiguous(),
-            use_cuda,
+            backend,
         )
         key_pages, value_pages = pool.pages(self.layer)
-        out = paged_attention(
+        out = backend.paged_attention(
             q[0].transpose(0, 1),
             key_pages,
             value_pages,
@@ -130,7 +114,6 @@ class PagedKvCache:
             batch.context_lens,
             k_scale=pool.k_scale,
             v_scale=pool.v_scale,
-            use_cuda=use_cuda,
             host=batch.host,
         )
         return out.transpose(0, 1)[None]

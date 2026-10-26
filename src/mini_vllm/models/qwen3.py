@@ -6,8 +6,7 @@ import torch
 
 from mini_vllm.config import ModelConfig
 from mini_vllm.engine.kv_cache import PagedKvCache
-from mini_vllm.layers.activation import swiglu
-from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
+from mini_vllm.layers.backends import Backend, get_backend
 from mini_vllm.layers.embedding_head import Embedding
 from mini_vllm.layers.layernorm import RMSNorm
 from mini_vllm.layers.linear import linear
@@ -33,9 +32,9 @@ class Qwen3MultiHeadAttention:
         q_norm: RMSNorm,
         k_norm: RMSNorm,
         rope: RoPE,
-        use_cuda: bool = False,
+        backend: str | Backend = "torch",
     ) -> None:
-        self.use_cuda = use_cuda
+        self.backend = get_backend(backend)
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
         self.head_dim = config.head_dim
@@ -58,9 +57,9 @@ class Qwen3MultiHeadAttention:
         # The cache writes this step's k and v and attends over everything it holds: a dense
         # history, or each ragged sequence's own pages. Without one, the tokens see only each other.
         if cache is None:
-            out = scaled_dot_product_attention_grouped(q, k, v, mask="causal", use_cuda=self.use_cuda)
+            out = self.backend.dense_attention(q, k, v, mask="causal")
         else:
-            out = cache.attend(q, k, v, self.use_cuda)
+            out = cache.attend(q, k, v, self.backend)
         return linear(out.transpose(1, 2).reshape(batch, length, -1), self.wo)
 
 
@@ -68,14 +67,14 @@ class Qwen3MLP:
     """down(silu(gate(x)) * up(x))."""
 
     def __init__(
-        self, w_gate: torch.Tensor, w_up: torch.Tensor, w_down: torch.Tensor, use_cuda: bool = False
+        self, w_gate: torch.Tensor, w_up: torch.Tensor, w_down: torch.Tensor, backend: str | Backend = "torch"
     ) -> None:
         self.w_gate, self.w_up, self.w_down = w_gate, w_up, w_down
-        self.use_cuda = use_cuda
+        self.backend = get_backend(backend)
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         gate, up = linear(x, self.w_gate), linear(x, self.w_up)
-        return linear(swiglu(gate, up, self.use_cuda), self.w_down)
+        return linear(self.backend.swiglu(gate, up), self.w_down)
 
 
 class Qwen3TransformerBlock:

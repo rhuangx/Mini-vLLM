@@ -3,7 +3,7 @@ prefix reuse, fp8 pages, and attention through the pool against a dense cache.""
 
 import pytest
 import torch
-from utils import assert_allclose, requires_cuda, with_and_without_cuda
+from utils import assert_allclose, requires_cuda, with_each_backend
 
 from mini_vllm.engine.block_manager import BlockManager, BlockPool, BlockTable
 from mini_vllm.engine.forward_batch import ForwardBatch
@@ -342,14 +342,14 @@ def nan_manager(num_blocks=16, block_size=4, device="cpu") -> BlockManager:
     return manager
 
 
-def attend(manager: BlockManager, scheduled, q, k, v, use_cuda=False) -> torch.Tensor:
+def attend(manager: BlockManager, scheduled, q, k, v, backend="torch") -> torch.Tensor:
     """Allocate, build the batch, and attend through layer 0 on [T, H, D] inputs."""
     for r, count in scheduled:
         manager.allocate(r, count)
     batch = ForwardBatch.from_scheduled(scheduled, manager)
     cache = PagedKvCache(manager.kv, 0, batch)
     as_row = lambda x: x.transpose(0, 1)[None]  # noqa: E731
-    out = cache.attend(as_row(q), as_row(k), as_row(v), use_cuda)
+    out = cache.attend(as_row(q), as_row(k), as_row(v), backend)
     for r, count in scheduled:
         r.num_computed_tokens += count
     return out[0].transpose(0, 1)
@@ -371,12 +371,12 @@ def qkv(length, device="cpu"):
     )
 
 
-@with_and_without_cuda
-def test_attending_through_the_pool_matches_a_dense_cache(use_cuda):
-    device = "cuda" if use_cuda else "cpu"
+@with_each_backend
+def test_attending_through_the_pool_matches_a_dense_cache(backend):
+    device = "cuda" if backend == "cuda" else "cpu"
     manager = nan_manager(device=device)
     q, k, v = qkv(10, device)
-    assert_allclose(attend(manager, [(request(range(10)), 10)], q, k, v, use_cuda), dense(q, k, v))
+    assert_allclose(attend(manager, [(request(range(10)), 10)], q, k, v, backend), dense(q, k, v))
 
 
 def test_a_shuffled_block_table_changes_nothing():
@@ -394,24 +394,24 @@ def test_a_shuffled_block_table_changes_nothing():
     assert_allclose(attend(manager, [(r, 12)], q, k, v), dense(q, k, v))
 
 
-@with_and_without_cuda
-def test_a_mixed_batch_matches_each_sequence_alone(use_cuda):
+@with_each_backend
+def test_a_mixed_batch_matches_each_sequence_alone(backend):
     """Two decodes beside a fresh prefill in one call: the shape the paged kernel serves.
     Block size 4 against lengths 7 and 5, so both decodes land mid-page."""
-    device = "cuda" if use_cuda else "cpu"
+    device = "cuda" if backend == "cuda" else "cpu"
     manager = nan_manager(device=device)
     old = [request(range(7)), request(range(5))]
     history = {}
     for r in old:
         q, k, v = qkv(len(r), device)
-        attend(manager, [(r, len(r))], q, k, v, use_cuda)
+        attend(manager, [(r, len(r))], q, k, v, backend)
         history[r.request_id] = (k, v)
         r.output_token_ids.append(9)
 
     fresh = request(range(6))
     scheduled = [(old[0], 1), (old[1], 1), (fresh, 6)]
     q, k, v = qkv(8, device)
-    together = attend(manager, scheduled, q, k, v, use_cuda)
+    together = attend(manager, scheduled, q, k, v, backend)
 
     rows = {old[0].request_id: slice(0, 1), old[1].request_id: slice(1, 2), fresh.request_id: slice(2, 8)}
     for r, _ in scheduled:
@@ -440,7 +440,7 @@ def test_the_cuda_write_is_the_pure_write_in_place(fp8):
     key = torch.randn(4, 2, 8, device="cuda").bfloat16()
     value = torch.randn(4, 2, 8, device="cuda").bfloat16()
     pools[0].write(1, slots, key, value)
-    pools[1].write(1, slots, key, value, use_cuda=True)
+    pools[1].write(1, slots, key, value, backend="cuda")
 
     for layer in range(2):
         assert torch.equal(pools[1].keys[layer], pools[0].keys[layer])

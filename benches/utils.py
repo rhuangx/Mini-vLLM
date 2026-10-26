@@ -196,9 +196,9 @@ def load_hf(model: str) -> tuple[Any, Tokenizer]:
     return hf_model, tokenizer
 
 
-def engine(hf_model: Any, tokenizer: Any, use_cuda: bool, **config: Any) -> LLM:
+def engine(hf_model: Any, tokenizer: Any, backend: str, **config: Any) -> LLM:
     """An engine over the HF weights, warmed up: the first pass pays kernel setup."""
-    llm = LLM(from_hf(hf_model, use_cuda), tokenizer, EngineConfig(**config))
+    llm = LLM(from_hf(hf_model, backend), tokenizer, EngineConfig(**config))
     llm.generate([[1] * 32, [2] * 8], max_tokens=4)
     return llm
 
@@ -210,9 +210,9 @@ def random_prompts(count: int, lengths: Iterable[int], vocab: int, seed: int = 0
     return [[rng.randrange(vocab) for _ in range(cycle[i % len(cycle)])] for i in range(count)]
 
 
-def variants() -> list[tuple[str, bool]]:
-    """(label, use_cuda) for each engine this machine can run."""
-    return [("mini-vllm pure", False)] + ([("mini-vllm cuda", True)] if CUDA_BUILT else [])
+def variants() -> list[tuple[str, str]]:
+    """(label, backend) for each engine this machine can run."""
+    return [("Mini-vLLM PyTorch", "torch")] + ([("Mini-vLLM CUDA", "cuda")] if CUDA_BUILT else [])
 
 
 def grouped_bars(axes: Axes, groups: list[str], series: dict[str, list[float]],

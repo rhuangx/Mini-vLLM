@@ -3,7 +3,7 @@ batch API, prefix caching, parallel sampling, stop tokens, and cleanup."""
 
 import pytest
 import torch
-from utils import PROMPTS, assert_nothing_held, engine, with_and_without_cuda
+from utils import PROMPTS, assert_nothing_held, engine, with_each_backend
 
 from mini_vllm.config import EngineConfig
 from mini_vllm.engine.llm_engine import LLM
@@ -22,9 +22,9 @@ from mini_vllm.utils.loader import from_hf
         {"num_blocks": 14, "max_batched_tokens": 16},
     ],
 )
-@with_and_without_cuda
-def test_every_request_matches_running_it_alone(tiny_qwen3, config, use_cuda):
-    llm = engine(tiny_qwen3, use_cuda=use_cuda, **config)
+@with_each_backend
+def test_every_request_matches_running_it_alone(tiny_qwen3, config, backend):
+    llm = engine(tiny_qwen3, backend=backend, **config)
     completions = llm.generate(PROMPTS, max_tokens=8)
 
     # Against the dense loop on the pure-torch model, so the kernels are checked too.
@@ -133,9 +133,9 @@ def test_abandoning_a_stream_releases_everything(tiny_qwen3):
     assert_nothing_held(llm)
 
 
-@with_and_without_cuda
-def test_an_fp8_kv_cache_serves_to_completion(tiny_qwen3, use_cuda):
-    llm = engine(tiny_qwen3, fp8_kv_cache=True, use_cuda=use_cuda)
+@with_each_backend
+def test_an_fp8_kv_cache_serves_to_completion(tiny_qwen3, backend):
+    llm = engine(tiny_qwen3, fp8_kv_cache=True, backend=backend)
     assert llm.kv.keys[0].dtype == torch.uint8
     completions = llm.generate(PROMPTS, max_tokens=8)
     assert all(len(c.token_ids) == 8 for c in completions)

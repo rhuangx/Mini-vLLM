@@ -214,7 +214,7 @@ def test_sampled_speculation_replays_under_a_seed_and_leaks_nothing(tiny_qwen3):
 def test_greedy_speculation_on_the_kernels_changes_no_token(tiny_qwen3):
     from mini_vllm.utils.loader import from_hf
 
-    llm = engine(tiny_qwen3, use_cuda=True, num_speculative_tokens=3, num_draft_layers=1, num_blocks=14,
+    llm = engine(tiny_qwen3, backend="cuda", num_speculative_tokens=3, num_draft_layers=1, num_blocks=14,
                  max_batched_tokens=16)
     pure = from_hf(tiny_qwen3)
     for prompt, completion in zip(PROMPTS, llm.generate(PROMPTS, max_tokens=8), strict=True):

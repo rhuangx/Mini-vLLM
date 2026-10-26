@@ -2,7 +2,7 @@
 so each can reuse the pages the ones before it cached. A hit removes prompt tokens from the
 prefill and leaves decoding alone, so time to first token is the metric it moves.
 
-    uv run python benches/bench_prefix_cache.py --cuda
+    uv run python benches/bench_prefix_cache.py --backend cuda
 """
 
 from __future__ import annotations
@@ -32,7 +32,8 @@ def run_alone(llm: LLM, prompt: list[int], max_tokens: int) -> tuple[float, int]
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--cuda", action="store_true", help="run on the CUDA kernels in src/extensions/")
+    parser.add_argument("--backend", choices=["torch", "cuda"], default="torch",
+                        help="cuda runs the kernels in src/extensions/")
     parser.add_argument("--requests", type=int, default=8)
     parser.add_argument("--preamble-len", type=int, default=2000)
     parser.add_argument("--question-len", type=int, default=32)
@@ -40,7 +41,7 @@ def main() -> None:
     args = parser.parse_args()
 
     title = (f"Prefix caching: {args.requests} requests, one after another, behind a shared "
-             f"{args.preamble_len}-token preamble, {'cuda' if args.cuda else 'pure'}")
+             f"{args.preamble_len}-token preamble, {args.backend}")
     with evidence(title):
         hf_model, tokenizer = load_hf(args.model)
         vocab = len(tokenizer.vocab)
@@ -53,7 +54,7 @@ def main() -> None:
         print("|---|---|---|---|---|")
         ttfts_by_setting = {}
         for enabled in (False, True):
-            llm = engine(hf_model, tokenizer, args.cuda, num_blocks=1024, enable_prefix_caching=enabled)
+            llm = engine(hf_model, tokenizer, args.backend, num_blocks=1024, enable_prefix_caching=enabled)
             start = time.perf_counter()
             ttfts, cached = zip(*(run_alone(llm, prompt, args.max_tokens) for prompt in prompts), strict=True)
             total = time.perf_counter() - start

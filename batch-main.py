@@ -26,12 +26,13 @@ parser.add_argument("--max-tokens", type=int, default=128)
 parser.add_argument("--num-blocks", type=int, default=2048, help="KV pages of 16 tokens")
 parser.add_argument("--prefix-caching", action="store_true")
 parser.add_argument("--fp8-kv-cache", action="store_true")
-parser.add_argument("--cuda", action="store_true", help="run on the CUDA kernels in src/extensions/")
+parser.add_argument("--backend", choices=["torch", "cuda"], default="torch",
+                    help="cuda runs the kernels in src/extensions/")
 args = parser.parse_args()
 
 llm = LLM.from_pretrained(
     args.model,
-    use_cuda=args.cuda,
+    backend=args.backend,
     num_blocks=args.num_blocks,
     max_sequences=args.concurrency,
     enable_prefix_caching=args.prefix_caching,

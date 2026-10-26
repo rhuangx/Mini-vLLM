@@ -15,7 +15,7 @@ draft is about 4.6 GB of weights in bf16, and each pool wants about 256 blocks.
 - **Radix-tree prefix caching**, so requests behind a shared preamble reuse its pages.
 - **Continuous batching** with chunked prefill and preemption.
 - **CUDA kernels** for RMSNorm, RoPE, SwiGLU, dense and paged attention, and the cache writes.
-  `flash_prefill` is an `mma.sync.m16n8k16` kernel and is the default prefill under `--cuda`.
+  `flash_prefill` is an `mma.sync.m16n8k16` kernel and is the default prefill under `--backend cuda`.
 - **FP8 KV cache**: half the bytes per page, about twice the capacity at the same budget.
 - **Speculative decoding**, verified by rejection sampling so the output distribution is unchanged.
   Pass `--draft-model` for a separate draft; if the pair does not fit, use a self-draft instead.
@@ -32,7 +32,7 @@ from mini_vllm import LLM, SamplingParams
 
 llm = LLM.from_pretrained(
     "Qwen/Qwen3-0.6B",
-    use_cuda=True,                # needs the CUDA kernels built
+    backend="cuda",               # needs the CUDA kernels built
     enable_prefix_caching=True,
     fp8_kv_cache=True,
     num_speculative_tokens=4,
@@ -46,8 +46,8 @@ for update in llm.generate_stream(["Once upon a time,"], SamplingParams(temperat
 ```
 
 ```bash
-uv run python main.py "Explain paged attention." --stream --cuda
-uv run python batch-main.py --concurrency 32 --cuda --prefix-caching --fp8-kv-cache
+uv run python main.py "Explain paged attention." --stream --backend cuda
+uv run python batch-main.py --concurrency 32 --backend cuda --prefix-caching --fp8-kv-cache
 uv run pytest
 uv run python benches/bench_operators.py
 ```

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
+from mini_vllm.layers.backends import Backend, get_backend
 
 __all__ = ["KvFullCache"]
 
@@ -28,9 +28,9 @@ class KvFullCache:
         return self.keys, self.values
 
     def attend(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, use_cuda: bool = False
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, backend: str | Backend = "torch"
     ) -> torch.Tensor:
         """Append this step's keys and values, then attend causally over the whole history.
         With S > L, the causal mask's S - L offset lines the new tokens up after it."""
         keys, values = self.update_and_fetch(k, v)
-        return scaled_dot_product_attention_grouped(q, keys, values, mask="causal", use_cuda=use_cuda)
+        return get_backend(backend).dense_attention(q, keys, values, mask="causal")

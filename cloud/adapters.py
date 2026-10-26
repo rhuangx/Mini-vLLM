@@ -75,7 +75,7 @@ class MiniVllmFactory:
             chunk_size=engine["max_num_batched_tokens"],  # like vLLM: one request may take the budget
             enable_prefix_caching=engine["prefix_caching"],
         )
-        # Phase 2 replaces use_cuda with backend; take whichever this checkout has.
+        # Checkouts before the backend switch took use_cuda; take whichever this one has.
         parameters = inspect.signature(LLM.from_pretrained).parameters
         if "backend" in parameters:
             kernel = {"backend": backend}
