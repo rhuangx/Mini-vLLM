@@ -7,8 +7,8 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from mini_vllm.config import SchedulerConfig
+from mini_vllm.engine.block_manager import BlockManager
 from mini_vllm.engine.sequence import Request, RequestStatus
-from mini_vllm.paged_kv_cache import BlockManager
 
 __all__ = ["Scheduler", "SchedulerOutput"]
 

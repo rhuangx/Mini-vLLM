@@ -1,8 +1,9 @@
 """batch.py: the ragged layout, built from scheduled requests and their block tables."""
 
-from mini_vllm.batch import PADDING_BLOCK, ForwardBatch
+from mini_vllm.engine.block_manager import BlockManager
+from mini_vllm.engine.forward_batch import PADDING_BLOCK, ForwardBatch
+from mini_vllm.engine.kv_cache import PagedKvPool
 from mini_vllm.engine.sequence import Request
-from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
 
 
 def make_manager(num_blocks=16, block_size=4) -> BlockManager:

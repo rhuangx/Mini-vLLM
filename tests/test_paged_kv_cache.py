@@ -5,11 +5,12 @@ import pytest
 import torch
 from utils import assert_allclose, requires_cuda, with_and_without_cuda
 
-from mini_vllm.batch import ForwardBatch
+from mini_vllm.engine.block_manager import BlockManager, BlockPool, BlockTable
+from mini_vllm.engine.forward_batch import ForwardBatch
+from mini_vllm.engine.kv_cache import PagedKvCache, PagedKvPool
 from mini_vllm.engine.sequence import Request
 from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
 from mini_vllm.layers.quantization import dequantize_fp8
-from mini_vllm.paged_kv_cache import BlockManager, BlockPool, BlockTable, PagedKvCache, PagedKvPool
 
 
 def request(token_ids) -> Request:

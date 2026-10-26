@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from mini_vllm.sampling_parameters import SamplingParams
 
 if TYPE_CHECKING:
-    from mini_vllm.paged_kv_cache import BlockTable
+    from mini_vllm.engine.block_manager import BlockTable
 
 __all__ = ["Request", "RequestStatus"]
 

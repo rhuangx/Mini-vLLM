@@ -1,6 +1,6 @@
 """prefix_cache.py: longest-prefix match, whole blocks only, first copy wins, eviction."""
 
-from mini_vllm.prefix_cache import PrefixCache
+from mini_vllm.engine.prefix_cache import PrefixCache
 
 
 def test_match_returns_the_longest_cached_prefix():
