@@ -16,7 +16,6 @@ from .engine.prefix_cache import *
 from .engine.scheduler import *
 from .engine.sequence import *
 from .engine.speculative import *
-from .generate import *
 from .layers.activation import *
 from .layers.attention import *
 from .layers.embedding_head import *
@@ -26,6 +25,7 @@ from .layers.quantization import *
 from .layers.rotary_embedding import *
 from .layers.sampler import *
 from .models.qwen3 import *
+from .reference.generate import *
 from .reference.kv_cache import *
 from .sampling_parameters import *
 from .utils.loader import *

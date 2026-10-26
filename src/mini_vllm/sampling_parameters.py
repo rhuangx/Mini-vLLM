@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["SamplingParams"]
+__all__ = ["GREEDY", "SamplingParams"]
 
 
 @dataclass(frozen=True)
@@ -20,3 +20,6 @@ class SamplingParams:
     @property
     def is_greedy(self) -> bool:
         return self.temperature == 0.0
+
+
+GREEDY = SamplingParams(temperature=0.0)

@@ -12,7 +12,7 @@ from mini_vllm.engine.kv_cache import PagedKvPool
 from mini_vllm.engine.scheduler import Scheduler
 from mini_vllm.engine.sequence import Request
 from mini_vllm.engine.speculative import accept_proposals, residual_distribution
-from mini_vllm.generate import generate_with_kv_cache
+from mini_vllm.reference.generate import generate_with_kv_cache
 from mini_vllm.sampling_parameters import SamplingParams
 
 # --- the rule -------------------------------------------------------------------------------

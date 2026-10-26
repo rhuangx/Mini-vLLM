@@ -7,7 +7,7 @@ from utils import with_and_without_cuda
 
 from mini_vllm.config import EngineConfig
 from mini_vllm.engine.llm_engine import LLM
-from mini_vllm.generate import generate_with_kv_cache
+from mini_vllm.reference.generate import generate_with_kv_cache
 from mini_vllm.sampling_parameters import SamplingParams
 from mini_vllm.utils.loader import from_hf
 

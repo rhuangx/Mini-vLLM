@@ -9,12 +9,9 @@ import torch
 from mini_vllm.layers.sampler import sample
 from mini_vllm.models.qwen3 import Qwen3Model
 from mini_vllm.reference.kv_cache import KvFullCache
-from mini_vllm.sampling_parameters import SamplingParams
+from mini_vllm.sampling_parameters import GREEDY, SamplingParams
 
-__all__ = ["GREEDY", "generate_with_kv_cache", "simple_generate"]
-
-GREEDY = SamplingParams(temperature=0.0)
-
+__all__ = ["generate_with_kv_cache", "simple_generate"]
 
 def _device(model: Qwen3Model) -> torch.device:
     return model.embedding.weight.device
