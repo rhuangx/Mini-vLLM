@@ -7,11 +7,13 @@ else, so bytes over step time against the peak says how close the engine runs to
 
 from __future__ import annotations
 
+import os
 import platform
 import statistics
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from cloud.workload import RequestRecord, Workload
 
@@ -139,9 +141,21 @@ def _query(*fields: str) -> list[str]:
     return [value.strip() for value in out.strip().splitlines()[0].split(",")]
 
 
+def _cpu_model() -> str | None:
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or None
+
+
 def environment() -> dict:
-    """The device and the software stack, recorded with every result: a run on the wrong GPU
-    or driver is not comparable to the baseline."""
+    """The device, the host CPU and the software stack, recorded with every result. A run on the
+    wrong GPU or driver is not comparable to the baseline, and an engine whose steps are bound by
+    Python overhead runs as fast as the host CPU it landed on: between two Modal containers, such
+    numbers have moved by 15-60%, while GPU-bound ones held within 1%."""
     import torch
 
     props = torch.cuda.get_device_properties(0)
@@ -151,6 +165,8 @@ def environment() -> dict:
         "capability": f"{props.major}.{props.minor}",
         "memory_gb": round(props.total_memory / 2**30, 1),
         "sms": props.multi_processor_count,
+        "cpu": _cpu_model(),
+        "cpus": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count(),
         "driver": smi[0] if smi else None,
         "max_sm_clock": smi[1] if len(smi) > 1 else None,
         "max_mem_clock": smi[2] if len(smi) > 2 else None,

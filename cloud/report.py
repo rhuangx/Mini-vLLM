@@ -73,16 +73,18 @@ def render(results: dict, baseline: dict | None = None, run: str = "") -> str:
     if baseline:
         out += ["Parenthesized: change against the baseline run.", ""]
 
-    out += ["## Environment", "", "| engine | device | driver | torch | CUDA | load s | KV blocks |",
-            "|---|---|---|---|---|---|---|"]
+    out += ["## Environment", "",
+            "| engine | device | host CPU | driver | torch | CUDA | load s | KV blocks |",
+            "|---|---|---|---|---|---|---|---|"]
     for label in labels:
         r = results[label]
         name = engine_name(label, r)
         if "error" in r:
-            out.append(f"| {name} | **failed**: {r['error'][:200]} | | | | | |")
+            out.append(f"| {name} | **failed**: {r['error'][:200]} | | | | | | |")
             continue
         env = r.get("env", {})
-        out.append(f"| {name} | {env.get('device')} | {env.get('driver')} | {env.get('torch')} | "
+        cpu = f"{env['cpu']} ({env.get('cpus')} cores)" if env.get("cpu") else "not recorded"
+        out.append(f"| {name} | {env.get('device')} | {cpu} | {env.get('driver')} | {env.get('torch')} | "
                    f"{env.get('cuda')} | {_fmt(r.get('load_s'))} | {r.get('kv_blocks')} |")
     out.append("")
 
@@ -145,6 +147,7 @@ def plot(results: dict, out_dir: Path) -> Path | None:
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        import matplotlib.ticker
     except ImportError:
         return None
     figure, (left, right) = plt.subplots(1, 2, figsize=(11, 4.2))
@@ -166,6 +169,7 @@ def plot(results: dict, out_dir: Path) -> Path | None:
     right.set_yscale("log")  # the pure-PyTorch path sits an order of magnitude above the rest
     for axes, ylabel in ((left, "output tokens/s"), (right, "time per output token, p50 (ms)")):
         axes.set_xscale("log", base=2)
+        axes.xaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x:g}"))  # 1, 2, 4, not 2^0
         axes.set_xlabel("requests in flight")
         axes.set_ylabel(ylabel)
         axes.grid(alpha=0.3)
