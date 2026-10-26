@@ -142,6 +142,7 @@ def plot(results: dict, out_dir: Path) -> None:
         if points:
             left.plot([p[0] for p in points], [p[1] for p in points], marker="o", label=label)
             right.plot([p[0] for p in points], [p[2] for p in points], marker="o", label=label)
+    right.set_yscale("log")  # the pure-torch path sits an order of magnitude above the rest
     for axes, ylabel in ((left, "output tokens/s"), (right, "TPOT p50 (ms)")):
         axes.set_xscale("log", base=2)
         axes.set_xlabel("requests in flight")
