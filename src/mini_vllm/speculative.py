@@ -12,6 +12,7 @@ from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
 from mini_vllm.qwen3 import Qwen3Model
 from mini_vllm.sampler import sampling_probabilities
 from mini_vllm.scheduler import Request
+from mini_vllm.utils import profiling
 
 __all__ = [
     "DraftProposer",
@@ -139,17 +140,20 @@ class DraftProposer:
         params = [request.sampling_params for request, _ in chosen]
         steps = []
         for _ in range(k):
-            scheduled = [(shadow, shadow.num_uncomputed_tokens) for _, shadow in chosen]
-            for shadow, count in scheduled:
-                self.manager.allocate(shadow, count)
-            batch = ForwardBatch.from_scheduled(scheduled, self.manager)
-            caches = self.kv.caches(batch)
-            logits = self.model(batch.input_ids[None], batch.positions, caches, rows=batch.last_rows)
-            q = sampling_probabilities(logits[0], params)
-            # A zero probability is never drawn, so a greedy row's one-hot q yields its argmax.
-            drawn = torch.multinomial(q, 1).squeeze(-1)
+            with profiling.span("draft.prepare"):
+                scheduled = [(shadow, shadow.num_uncomputed_tokens) for _, shadow in chosen]
+                for shadow, count in scheduled:
+                    self.manager.allocate(shadow, count)
+                batch = ForwardBatch.from_scheduled(scheduled, self.manager)
+                caches = self.kv.caches(batch)
+            with profiling.span("draft.forward"):
+                logits = self.model(batch.input_ids[None], batch.positions, caches, rows=batch.last_rows)
+            with profiling.span("draft.sample"):
+                q = sampling_probabilities(logits[0], params)
+                # A zero probability is never drawn, so a greedy row's one-hot q yields its argmax.
+                drawn = torch.multinomial(q, 1).squeeze(-1).tolist()
             steps.append(q)
-            for (shadow, count), token in zip(scheduled, drawn.tolist(), strict=True):
+            for (shadow, count), token in zip(scheduled, drawn, strict=True):
                 shadow.num_computed_tokens += count
                 shadow.output_token_ids.append(token)
 

@@ -17,6 +17,8 @@ from mini_vllm.qwen3 import Qwen3Model
 from mini_vllm.sampler import SamplingParams, sample
 from mini_vllm.scheduler import Request, RequestStatus, Scheduler, SchedulerConfig, SchedulerOutput
 from mini_vllm.speculative import DraftProposer, SpeculativeDecoder, self_draft
+from mini_vllm.utils import profiling
+from mini_vllm.utils.profiling import StepStats
 
 __all__ = ["LLM", "Completion", "EngineConfig", "StreamUpdate", "blocks_that_fit"]
 
@@ -122,6 +124,7 @@ class LLM:
         self.manager = BlockManager(self.kv, config.enable_prefix_caching)
         self.scheduler = Scheduler(config.scheduler_config(), self.manager)
         self.spec = self._build_speculation() if config.num_speculative_tokens else None
+        self.last_step: StepStats | None = None  # what the latest step() computed
 
         if config.seed is not None:
             torch.manual_seed(config.seed)
@@ -181,28 +184,37 @@ class LLM:
         if self.spec is not None:
             running = self.scheduler.running
             decoding = [r for r in running if r.output_token_ids and r.num_uncomputed_tokens == 1]
-            self.spec.propose(decoding)
-        output = self.scheduler.schedule()
+            with profiling.span("spec.propose"):
+                self.spec.propose(decoding)
+        with profiling.span("schedule"):
+            output = self.scheduler.schedule()
         scheduled = {request.request_id for request in output.requests}
         for request in decoding:
             if request.request_id not in scheduled:
                 self.spec.discard(request)
 
-        # A speculated request needs logits for every row it computed, to verify each
-        # proposal; everything else needs only its last row.
-        rows, spans, start = [], [], 0
-        for request, count in output.scheduled:
-            first = len(rows)
-            rows.extend(range(start, start + count) if request.proposed_token_ids else [start + count - 1])
-            spans.append(slice(first, len(rows)))
-            start += count
-        batch = ForwardBatch.from_scheduled(output.scheduled, self.manager)
-        caches = self.kv.caches(batch)
-        device = batch.input_ids.device
-        row_index = torch.tensor(rows, dtype=torch.int32, device=device)
-        logits = self.model(batch.input_ids[None], batch.positions, caches, rows=row_index)[0]
-        last = logits[torch.tensor([span.stop - 1 for span in spans], device=device)]
-        tokens = sample(last, [request.sampling_params for request in output.requests]).tolist()
+        with profiling.span("prepare"):
+            # A speculated request needs logits for every row it computed, to verify each
+            # proposal; everything else needs only its last row.
+            rows, spans, start = [], [], 0
+            for request, count in output.scheduled:
+                first = len(rows)
+                every_row = bool(request.proposed_token_ids)
+                rows.extend(range(start, start + count) if every_row else [start + count - 1])
+                spans.append(slice(first, len(rows)))
+                start += count
+            batch = ForwardBatch.from_scheduled(output.scheduled, self.manager)
+            caches = self.kv.caches(batch)
+            device = batch.input_ids.device
+            row_index = torch.tensor(rows, dtype=torch.int32, device=device)
+        timer = profiling.CudaTimer(device)
+        with profiling.span("forward"):
+            timer.start()
+            logits = self.model(batch.input_ids[None], batch.positions, caches, rows=row_index)[0]
+            timer.stop()
+        with profiling.span("sample"):
+            last = logits[torch.tensor([span.stop - 1 for span in spans], device=device)]
+            tokens = sample(last, [request.sampling_params for request in output.requests]).tolist()
 
         # Read before commit advances them: a request takes a token only once caught up.
         emitting = [
@@ -210,14 +222,24 @@ class LLM:
             for request, count in output.scheduled
             if request.num_computed_tokens + count == len(request) and not request.proposed_token_ids
         ]
-        runs = {
-            request.request_id: self.spec.verify(request, logits[span])
-            for (request, _), span in zip(output.scheduled, spans, strict=True)
-            if request.proposed_token_ids
-        }
-        # Before commit, which frees a leader that finishes on its first token.
-        forked = self._fork_after_prefill(output, last)
-        finished = self.scheduler.commit(output, tokens, verified=runs.keys())
+        with profiling.span("spec.verify"):
+            runs = {
+                request.request_id: self.spec.verify(request, logits[span])
+                for (request, _), span in zip(output.scheduled, spans, strict=True)
+                if request.proposed_token_ids
+            }
+        with profiling.span("commit"):
+            # Before commit, which frees a leader that finishes on its first token.
+            forked = self._fork_after_prefill(output, last)
+            finished = self.scheduler.commit(output, tokens, verified=runs.keys())
+        self.last_step = StepStats(
+            num_seqs=len(output.scheduled),
+            num_tokens=start,
+            context_tokens=sum(batch.host[2]),
+            pure_decode=all(count == 1 for _, count in output.scheduled) and not runs,
+            num_preempted=len(output.preempted),
+            forward_ms=timer.elapsed_ms(),  # the sample's .tolist() already waited for the forward
+        )
 
         emitted = [(request, request.output_token_ids[-1]) for request in emitting]
         for request in output.requests:

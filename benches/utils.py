@@ -3,6 +3,7 @@ engine in a run shares, and the plots written to results/."""
 
 from __future__ import annotations
 
+import os
 import platform
 import random
 import statistics
@@ -28,10 +29,11 @@ try:
     import mini_vllm_ext  # noqa: F401
 
     CUDA_BUILT = True
-except ImportError:
+except (ImportError, OSError):  # OSError: the package is there but _ext.so is not built
     CUDA_BUILT = False
 
-RESULTS = Path(__file__).resolve().parent.parent / "results"
+# MINI_VLLM_RESULTS moves the plots, e.g. onto a Modal volume; by default they land in results/.
+RESULTS = Path(os.environ.get("MINI_VLLM_RESULTS") or Path(__file__).resolve().parent.parent / "results")
 
 
 def per_call_us(fn: Callable[[], Any], calls: int = 50, repeats: int = 20) -> float:
@@ -157,8 +159,11 @@ def evidence(title: str) -> Iterator[None]:
     """Print the device, the toolchain and TF32, run the bench, then say whether the clocks
     stayed up. A throttled run is not an absolute measurement."""
     props = torch.cuda.get_device_properties(0)
-    commit = _run("git", "rev-parse", "--short", "HEAD").strip()
-    dirty = " + uncommitted changes" if _run("git", "status", "--porcelain").strip() else ""
+    # A container has no .git, so whoever launched it says which commit this is.
+    commit = os.environ.get("MINI_VLLM_COMMIT") or _run("git", "rev-parse", "--short", "HEAD").strip()
+    dirty = ""
+    if "MINI_VLLM_COMMIT" not in os.environ and _run("git", "status", "--porcelain").strip():
+        dirty = " + uncommitted changes"
     driver = _run("nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader").strip()
     print(f"# {title}\n")
     print(f"- {props.name}, sm_{props.major}{props.minor}, {props.total_memory / 2**30:.1f} GB, "
@@ -231,7 +236,7 @@ def grouped_bars(axes: Axes, groups: list[str], series: dict[str, list[float]],
 
 def save_plot(figure: Figure, name: str) -> None:
     """Write figure to results/<name>.png, replacing the previous run's."""
-    RESULTS.mkdir(exist_ok=True)
+    RESULTS.mkdir(parents=True, exist_ok=True)
     path = RESULTS / f"{name}.png"
     figure.savefig(path, dpi=150, bbox_inches="tight")
-    print(f"\nPlot: {path.relative_to(RESULTS.parent)}")
+    print(f"\nPlot: {path}")
