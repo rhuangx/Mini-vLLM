@@ -201,6 +201,55 @@ def sweep_vllm(run_dir: str, label: str, enforce_eager: bool, workloads: list[di
     return result
 
 
+@app.function(image=MINI, gpu=GPU, volumes=VOLUMES, timeout=2 * 3600, cpu=8.0, memory=65536)
+def ab_mini(
+    run_dir: str, versions: dict[str, bytes], backend: str, workloads: list[dict], rounds: int
+) -> dict:
+    """Run each version of src/mini_vllm on the same workloads in this one container, in
+    alternating order (A B, B A, ...), each in a fresh process: host speed varies between
+    containers far more than a refactor moves a host-bound step, but not within one."""
+    import io
+    import statistics
+    import tarfile
+
+    roots = {}
+    for name, archive in versions.items():
+        root = Path("/tmp/ab") / name.split()[-1]
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            tar.extractall(root, filter="data")
+        roots[name] = root
+    runs: dict[str, list[dict]] = {name: [] for name in versions}
+    for round_index in range(rounds):
+        order = list(versions) if round_index % 2 == 0 else list(reversed(versions))
+        for name in order:
+            env = {**os.environ, "PYTHONPATH": f"{roots[name]}/src:{REMOTE}/src/extensions:/root"}
+            done = subprocess.run(
+                [sys.executable, "-m", "cloud.ab_worker", backend, json.dumps(workloads)],
+                env=env, cwd="/root", capture_output=True, text=True,
+            )
+            if done.returncode != 0:
+                raise RuntimeError(f"{name} failed:\n{done.stderr[-3000:]}")
+            runs[name].append(json.loads(done.stdout.strip().splitlines()[-1]))
+            print(f"round {round_index + 1}, {name}: {runs[name][-1]['workloads']}")
+
+    names = list(versions)
+    summary = {}
+    for workload in runs[names[0]][0]["workloads"]:
+        row = {}
+        for name in names:
+            row[name] = {
+                metric: statistics.median(run["workloads"][workload][metric] for run in runs[name])
+                for metric in ("output_tok_s", "tpot_p50_ms", "step_p50_ms")
+            }
+        base, head = row[names[0]]["output_tok_s"], row[names[1]]["output_tok_s"]
+        row["tok_s_change"] = (head - base) / base
+        summary[workload] = row
+    result = {"versions": names, "backend": backend, "rounds": rounds, "summary": summary, "runs": runs}
+    _save(Path(RESULTS) / run_dir / "ab.json", result)
+    results_volume.commit()
+    return result
+
+
 # Local entry points.
 
 def _run_dir(tag: str) -> tuple[str, str]:
@@ -288,3 +337,33 @@ def sweep(suite: str = "quick", engines: str = "mini-cuda,vllm", tag: str = "adh
     print(text)
     print(f"\nsaved {local}/summary.json and report.md; traces: "
           f"modal volume get mini-vllm-results /{run_dir} results/modal/{run_dir}")
+
+
+def _archive(revision: str) -> bytes:
+    """src/mini_vllm as it was at revision, as a tar."""
+    return subprocess.run(["git", "archive", "--format=tar", revision, "src/mini_vllm"],
+                          cwd=REPO, capture_output=True, check=True).stdout
+
+
+@app.local_entrypoint()
+def ab(base: str = "HEAD~1", head: str = "HEAD", backend: str = "cuda", suite: str = "ab",
+       rounds: int = 3, tag: str = "ab") -> None:
+    """Compare two commits of src/mini_vllm in one container: the regression check for
+    host-bound points, which move with the container's CPU."""
+    def sha(revision: str) -> str:
+        return subprocess.run(["git", "rev-parse", "--short", revision], cwd=REPO,
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    run_dir, _ = _run_dir(tag)
+    versions = {f"base {sha(base)}": _archive(base), f"head {sha(head)}": _archive(head)}
+    result = ab_mini.remote(run_dir, versions, backend, [asdict(w) for w in SUITES[suite]], rounds)
+    names = result["versions"]
+    print(f"\n| workload | {names[0]} tok/s | {names[1]} tok/s | change | step p50 ms |")
+    print("|---|---|---|---|---|")
+    for workload, row in result["summary"].items():
+        a, b = row[names[0]], row[names[1]]
+        print(f"| {workload} | {a['output_tok_s']:.0f} | {b['output_tok_s']:.0f} "
+              f"| {row['tok_s_change']:+.1%} | {a['step_p50_ms']:.1f} → {b['step_p50_ms']:.1f} |")
+    local = REPO / "results" / "modal" / run_dir
+    _save(local / "ab.json", result)
+    print(f"\nmedians of {rounds} alternating rounds; saved {local / 'ab.json'}")
