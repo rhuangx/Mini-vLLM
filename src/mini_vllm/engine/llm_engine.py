@@ -13,6 +13,7 @@ from mini_vllm.config import EngineConfig
 from mini_vllm.engine.block_manager import BlockManager
 from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
+from mini_vllm.engine.model_runner import run_batch
 from mini_vllm.engine.scheduler import Scheduler, SchedulerOutput
 from mini_vllm.engine.sequence import Request, RequestStatus
 from mini_vllm.engine.speculative import DraftProposer, SpeculativeDecoder, self_draft
@@ -171,13 +172,12 @@ class LLM:
                 spans.append(slice(first, len(rows)))
                 start += count
             batch = ForwardBatch.from_scheduled(output.scheduled, self.manager)
-            caches = self.kv.caches(batch)
             device = batch.input_ids.device
             row_index = torch.tensor(rows, dtype=torch.int32, device=device)
         timer = profiling.CudaTimer(device)
         with profiling.span("forward"):
             timer.start()
-            logits = self.model(batch.input_ids[None], batch.positions, caches, rows=row_index)[0]
+            logits = run_batch(self.model, self.kv, batch, rows=row_index)
             timer.stop()
         with profiling.span("sample"):
             last = logits[torch.tensor([span.stop - 1 for span in spans], device=device)]

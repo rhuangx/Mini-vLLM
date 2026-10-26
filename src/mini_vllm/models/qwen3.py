@@ -5,16 +5,12 @@ from __future__ import annotations
 import torch
 
 from mini_vllm.config import ModelConfig
-from mini_vllm.engine.kv_cache import PagedKvCache
 from mini_vllm.layers.backends import Backend, get_backend
 from mini_vllm.layers.embedding_head import Embedding
 from mini_vllm.layers.layernorm import RMSNorm
 from mini_vllm.layers.linear import linear
 from mini_vllm.layers.rotary_embedding import RoPE
-from mini_vllm.reference.kv_cache import KvFullCache
-
-# What a layer attends through: a dense history, or one layer's view of a paged batch.
-Cache = KvFullCache | PagedKvCache
+from mini_vllm.utils.context import get_context
 
 __all__ = ["Qwen3MLP", "Qwen3Model", "Qwen3MultiHeadAttention", "Qwen3TransformerBlock"]
 
@@ -32,8 +28,10 @@ class Qwen3MultiHeadAttention:
         q_norm: RMSNorm,
         k_norm: RMSNorm,
         rope: RoPE,
+        layer_idx: int,
         backend: str | Backend = "torch",
     ) -> None:
+        self.layer_idx = layer_idx  # which layer of the forward's KV storage is this layer's
         self.backend = get_backend(backend)
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
@@ -42,7 +40,7 @@ class Qwen3MultiHeadAttention:
         self.q_norm, self.k_norm = q_norm, k_norm
         self.rope = rope
 
-    def __call__(self, x: torch.Tensor, positions: torch.Tensor, cache: Cache | None = None) -> torch.Tensor:
+    def __call__(self, x: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         batch, length, _ = x.shape
 
         q = linear(x, self.wq).reshape(batch, length, self.num_heads, self.head_dim)
@@ -54,12 +52,16 @@ class Qwen3MultiHeadAttention:
         k = self.rope(self.k_norm(k), positions).transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # The cache writes this step's k and v and attends over everything it holds: a dense
-        # history, or each ragged sequence's own pages. Without one, the tokens see only each other.
-        if cache is None:
-            out = self.backend.dense_attention(q, k, v, mask="causal")
+        # The forward's storage takes this step's k and v and attends over everything it
+        # holds: each ragged sequence's own pages, or a dense history. Without any, the tokens
+        # see only each other.
+        context = get_context()
+        if context.kv is not None:
+            out = context.kv.attend(self.layer_idx, context.batch, q, k, v, self.backend)
+        elif context.dense_caches is not None:
+            out = context.dense_caches[self.layer_idx].attend(q, k, v, self.backend)
         else:
-            out = cache.attend(q, k, v, self.backend)
+            out = self.backend.dense_attention(q, k, v, mask="causal")
         return linear(out.transpose(1, 2).reshape(batch, length, -1), self.wo)
 
 
@@ -92,8 +94,8 @@ class Qwen3TransformerBlock:
         self.input_layernorm = input_layernorm
         self.post_attention_layernorm = post_attention_layernorm
 
-    def __call__(self, x: torch.Tensor, positions: torch.Tensor, cache: Cache | None = None) -> torch.Tensor:
-        h = x + self.attention(self.input_layernorm(x), positions, cache)
+    def __call__(self, x: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        h = x + self.attention(self.input_layernorm(x), positions)
         return h + self.mlp(self.post_attention_layernorm(h))
 
 
@@ -102,9 +104,10 @@ class Qwen3Model:
 
     rows selects which token rows get logits; None means all of them.
 
-    With no caches every call attends only over its own tokens: the full-recompute oracle.
-    With a KvFullCache per layer, each call appends to one dense history per row. With the
-    PagedKvCache views of a ForwardBatch, B = 1 and L is the batch's T flattened tokens.
+    What attention caches in comes from the forward context (utils/context.py). With none,
+    every call attends only over its own tokens: the full-recompute oracle. With a KvFullCache
+    per layer, each call appends to one dense history per row. With a paged pool and a
+    ForwardBatch, B = 1 and L is the batch's T flattened tokens.
     """
 
     def __init__(
@@ -125,12 +128,11 @@ class Qwen3Model:
         self,
         inputs: torch.Tensor,
         positions: torch.Tensor,
-        caches: list[Cache] | None = None,
         rows: torch.Tensor | None = None,
     ) -> torch.Tensor:
         h = self.embedding(inputs)
-        for index, layer in enumerate(self.layers):
-            h = layer(h, positions, None if caches is None else caches[index])
+        for layer in self.layers:
+            h = layer(h, positions)
 
         # Only these token rows reach the LM head: one per sequence when serving, rather
         # than a V-wide row for every prompt token in a chunk.

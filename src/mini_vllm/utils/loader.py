@@ -41,7 +41,7 @@ def from_hf(hf_model: Any, backend: str | Backend = "torch") -> Qwen3Model:
     rope = RoPE(config.head_dim, config.max_position_embeddings, config.rope_theta, backend, device=device)
 
     layers = []
-    for layer in hf_model.model.layers:
+    for index, layer in enumerate(hf_model.model.layers):
         attn, mlp = layer.self_attn, layer.mlp
         attention = Qwen3MultiHeadAttention(
             config,
@@ -52,6 +52,7 @@ def from_hf(hf_model: Any, backend: str | Backend = "torch") -> Qwen3Model:
             norm(config.head_dim, _frozen(attn.q_norm.weight)),
             norm(config.head_dim, _frozen(attn.k_norm.weight)),
             rope,
+            index,
             backend,
         )
         layers.append(

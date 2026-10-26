@@ -11,6 +11,7 @@ from mini_vllm.config import SchedulerConfig
 from mini_vllm.engine.block_manager import BlockManager
 from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
+from mini_vllm.engine.model_runner import run_batch
 from mini_vllm.engine.scheduler import Scheduler
 from mini_vllm.engine.sequence import Request, RequestStatus
 from mini_vllm.layers.sampler import sample
@@ -272,7 +273,7 @@ def run(scheduler: Scheduler, model, kv: PagedKvPool, max_iterations: int = 2000
         output = scheduler.schedule()
         preempted += len(output.preempted)
         batch = ForwardBatch.from_scheduled(output.scheduled, scheduler.manager)
-        logits = model(batch.input_ids[None], batch.positions, kv.caches(batch))[0, batch.last_rows.long()]
+        logits = run_batch(model, kv, batch, rows=batch.last_rows)
         tokens = sample(logits, [r.sampling_params for r in output.requests]).tolist()
         scheduler.commit(output, tokens)
     raise AssertionError("the scheduler stopped making progress")

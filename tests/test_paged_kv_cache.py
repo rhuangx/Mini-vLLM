@@ -7,7 +7,7 @@ from utils import assert_allclose, requires_cuda, with_each_backend
 
 from mini_vllm.engine.block_manager import BlockManager, BlockPool, BlockTable
 from mini_vllm.engine.forward_batch import ForwardBatch
-from mini_vllm.engine.kv_cache import PagedKvCache, PagedKvPool
+from mini_vllm.engine.kv_cache import PagedKvPool
 from mini_vllm.engine.sequence import Request
 from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
 from mini_vllm.layers.quantization import dequantize_fp8
@@ -347,9 +347,8 @@ def attend(manager: BlockManager, scheduled, q, k, v, backend="torch") -> torch.
     for r, count in scheduled:
         manager.allocate(r, count)
     batch = ForwardBatch.from_scheduled(scheduled, manager)
-    cache = PagedKvCache(manager.kv, 0, batch)
     as_row = lambda x: x.transpose(0, 1)[None]  # noqa: E731
-    out = cache.attend(as_row(q), as_row(k), as_row(v), backend)
+    out = manager.kv.attend(0, batch, as_row(q), as_row(k), as_row(v), backend)
     for r, count in scheduled:
         r.num_computed_tokens += count
     return out[0].transpose(0, 1)

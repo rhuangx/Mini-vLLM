@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 
 import torch
 
@@ -10,8 +10,23 @@ from mini_vllm.layers.sampler import sample
 from mini_vllm.models.qwen3 import Qwen3Model
 from mini_vllm.reference.kv_cache import KvFullCache
 from mini_vllm.sampling_parameters import GREEDY, SamplingParams
+from mini_vllm.utils.context import Context, forward_context
 
-__all__ = ["generate_with_kv_cache", "simple_generate"]
+__all__ = ["forward_logits", "generate_with_kv_cache", "simple_generate"]
+
+
+def forward_logits(
+    model: Qwen3Model,
+    inputs: torch.Tensor,
+    positions: torch.Tensor,
+    caches: Sequence[KvFullCache] | None = None,
+    rows: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """The model's logits with each layer appending to its own dense history in caches, or,
+    with none, attending only over this call's tokens."""
+    with forward_context(Context(dense_caches=caches)):
+        return model(inputs, positions, rows=rows)
+
 
 def _device(model: Qwen3Model) -> torch.device:
     return model.embedding.weight.device
@@ -28,7 +43,8 @@ def simple_generate(
     device = _device(model)
     tokens = list(prompt)
     for _ in range(max_tokens):
-        logits = model(
+        logits = forward_logits(
+            model,
             torch.tensor([tokens], dtype=torch.int32, device=device),
             torch.arange(len(tokens), device=device),
         )
@@ -55,7 +71,8 @@ def generate_with_kv_cache(
     logits = None
     for start in range(0, len(prompt), chunk):
         piece = prompt[start : start + chunk]
-        logits = model(
+        logits = forward_logits(
+            model,
             torch.tensor([piece], dtype=torch.int32, device=device),
             torch.arange(start, start + len(piece), device=device),
             caches,
@@ -68,7 +85,8 @@ def generate_with_kv_cache(
         if token in eos_token_ids or len(generated) == max_tokens:
             return generated
         # The new token sits at the position right after everything cached.
-        logits = model(
+        logits = forward_logits(
+            model,
             torch.tensor([[token]], dtype=torch.int32, device=device),
             torch.tensor([caches[0].offset], device=device),
             caches,

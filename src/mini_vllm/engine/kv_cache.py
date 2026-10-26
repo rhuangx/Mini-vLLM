@@ -1,5 +1,5 @@
-"""The paged KV cache's storage: every layer's pages, written through a slot mapping, and the
-per-layer view the model attends through."""
+"""The paged KV cache's storage: every layer's pages, written through a slot mapping, and
+attention over them for a ragged batch."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from mini_vllm.layers.backends import Backend, get_backend
 if TYPE_CHECKING:
     from mini_vllm.engine.forward_batch import ForwardBatch
 
-__all__ = ["PagedKvCache", "PagedKvPool"]
+__all__ = ["PagedKvPool"]
 
 
 class PagedKvPool:
@@ -75,35 +75,32 @@ class PagedKvPool:
         for pool in (*self.keys, *self.values):
             pool[dst] = pool[src]
 
-    def caches(self, batch: ForwardBatch) -> list[PagedKvCache]:
-        """One view per layer for this batch, to pass to the model as its caches."""
-        return [PagedKvCache(self, layer, batch) for layer in range(len(self.keys))]
-
-
-class PagedKvCache:
-    """One layer of the pool, as seen by one ragged batch. The model sees one row of
-    T flattened tokens: q is 1 x H_q x T x D, k and v are 1 x H_k x T x D."""
-
-    def __init__(self, pool: PagedKvPool, layer: int, batch: ForwardBatch) -> None:
-        self.pool = pool
-        self.layer = layer
-        self.batch = batch
+    @property
+    def num_layers(self) -> int:
+        return len(self.keys)
 
     def attend(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, backend: str | Backend = "torch"
+        self,
+        layer: int,
+        batch: ForwardBatch,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        backend: str | Backend = "torch",
     ) -> torch.Tensor:
-        """Write this batch's keys and values into their slots, then attend each sequence
-        over its own pages."""
-        pool, batch, backend = self.pool, self.batch, get_backend(backend)
+        """One layer's attention for a ragged batch: write the batch's keys and values into
+        their slots, then attend each sequence over its own pages. The model sees one row of
+        T flattened tokens: q is 1 x H_q x T x D, k and v are 1 x H_k x T x D."""
+        backend = get_backend(backend)
         # k, v arrive as 1 x H_k x T x D; the pool wants T x H_k x D, contiguous.
-        pool.write(
-            self.layer,
+        self.write(
+            layer,
             batch.slot_mapping,
             k[0].transpose(0, 1).contiguous(),
             v[0].transpose(0, 1).contiguous(),
             backend,
         )
-        key_pages, value_pages = pool.pages(self.layer)
+        key_pages, value_pages = self.pages(layer)
         out = backend.paged_attention(
             q[0].transpose(0, 1),
             key_pages,
@@ -111,8 +108,8 @@ class PagedKvCache:
             batch.block_tables,
             batch.cu_seqlens_q,
             batch.context_lens,
-            k_scale=pool.k_scale,
-            v_scale=pool.v_scale,
+            k_scale=self.k_scale,
+            v_scale=self.v_scale,
             host=batch.host,
         )
         return out.transpose(0, 1)[None]

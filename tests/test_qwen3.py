@@ -8,7 +8,9 @@ from utils import assert_allclose
 from mini_vllm.engine.block_manager import BlockManager
 from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
+from mini_vllm.engine.model_runner import run_batch
 from mini_vllm.engine.sequence import Request
+from mini_vllm.reference.generate import forward_logits
 from mini_vllm.reference.kv_cache import KvFullCache
 from mini_vllm.utils.loader import from_hf
 
@@ -32,7 +34,7 @@ def test_cached_prefill_matches_the_dense_forward(tiny_qwen3):
     ids = torch.randint(0, 512, (1, 10), device="cuda")
 
     positions = torch.arange(10, device="cuda")
-    assert_allclose(model(ids, positions, caches_for(model)), model(ids, positions))
+    assert_allclose(forward_logits(model, ids, positions, caches_for(model)), model(ids, positions))
 
 
 def test_cached_decode_matches_recomputing_from_scratch(tiny_qwen3):
@@ -42,8 +44,8 @@ def test_cached_decode_matches_recomputing_from_scratch(tiny_qwen3):
     step = torch.randint(0, 512, (1, 1), device="cuda")
 
     caches = caches_for(model)
-    model(prompt, torch.arange(9, device="cuda"), caches)
-    got = model(step, torch.tensor([9], device="cuda"), caches)
+    forward_logits(model, prompt, torch.arange(9, device="cuda"), caches)
+    got = forward_logits(model, step, torch.tensor([9], device="cuda"), caches)
     want = model(torch.cat([prompt, step], dim=1), torch.arange(10, device="cuda"))[:, -1:]
 
     assert_allclose(got, want)
@@ -58,7 +60,8 @@ def test_chunked_prefill_matches_one_pass(tiny_qwen3, chunk):
 
     caches = caches_for(model)
     pieces = [
-        model(
+        forward_logits(
+            model,
             prompt[:, start : start + chunk],
             torch.arange(start, min(start + chunk, 50), device="cuda"),
             caches,
@@ -75,8 +78,8 @@ def test_a_wrong_position_at_a_chunk_boundary_is_caught(tiny_qwen3):
     whole = model(prompt, torch.arange(40, device="cuda"))[:, -1]
 
     caches = caches_for(model)
-    model(prompt[:, :20], torch.arange(20, device="cuda"), caches)
-    wrong = model(prompt[:, 20:], torch.arange(20, device="cuda"), caches)[:, -1]
+    forward_logits(model, prompt[:, :20], torch.arange(20, device="cuda"), caches)
+    wrong = forward_logits(model, prompt[:, 20:], torch.arange(20, device="cuda"), caches)[:, -1]
 
     assert not torch.allclose(wrong, whole, rtol=1e-3, atol=1e-3), (
         "restarting RoPE at zero changed nothing, so the positions are not being used"
@@ -116,7 +119,7 @@ def paged_forward(model, kv, manager, scheduled):
     for request, count in scheduled:
         manager.allocate(request, count)
     batch = ForwardBatch.from_scheduled(scheduled, manager)
-    logits = model(batch.input_ids[None], batch.positions, kv.caches(batch))[0]
+    logits = run_batch(model, kv, batch)
     for request, count in scheduled:
         request.num_computed_tokens += count
     return logits, batch

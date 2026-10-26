@@ -4,7 +4,7 @@ import pytest
 import torch
 from utils import with_each_backend
 
-from mini_vllm.reference.generate import generate_with_kv_cache, simple_generate
+from mini_vllm.reference.generate import forward_logits, generate_with_kv_cache, simple_generate
 from mini_vllm.reference.kv_cache import KvFullCache
 from mini_vllm.utils.loader import from_hf
 
@@ -82,12 +82,13 @@ def test_greedy_choices_match_transformers_away_from_bf16_ties(real_qwen3, backe
 
         # Our cached loop, fed HF's tokens instead of its own.
         caches = [KvFullCache() for _ in model.layers]
-        logits = model(
-            torch.tensor([prompt], device=device), torch.arange(len(prompt), device=device), caches
+        logits = forward_logits(
+            model, torch.tensor([prompt], device=device), torch.arange(len(prompt), device=device), caches
         )
         ours = [int(torch.argmax(logits[0, -1]))]
         for token in continuation[:-1]:
-            logits = model(
+            logits = forward_logits(
+                model,
                 torch.tensor([[token]], device=device),
                 torch.tensor([caches[0].offset], device=device),
                 caches,

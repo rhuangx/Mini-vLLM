@@ -10,6 +10,7 @@ import torch
 from mini_vllm.engine.block_manager import BlockManager
 from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
+from mini_vllm.engine.model_runner import run_batch
 from mini_vllm.engine.sequence import Request
 from mini_vllm.layers.sampler import sampling_probabilities
 from mini_vllm.models.qwen3 import Qwen3Model
@@ -146,11 +147,11 @@ class DraftProposer:
                 for shadow, count in scheduled:
                     self.manager.allocate(shadow, count)
                 batch = ForwardBatch.from_scheduled(scheduled, self.manager)
-                caches = self.kv.caches(batch)
             with profiling.span("draft.forward"):
-                logits = self.model(batch.input_ids[None], batch.positions, caches, rows=batch.last_rows)
+                # The draft's own pool: a self-draft's layers are the target's, but not its cache.
+                logits = run_batch(self.model, self.kv, batch, rows=batch.last_rows)
             with profiling.span("draft.sample"):
-                q = sampling_probabilities(logits[0], params)
+                q = sampling_probabilities(logits, params)
                 # A zero probability is never drawn, so a greedy row's one-hot q yields its argmax.
                 drawn = torch.multinomial(q, 1).squeeze(-1).tolist()
             steps.append(q)
