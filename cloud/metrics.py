@@ -151,6 +151,24 @@ def _cpu_model() -> str | None:
     return platform.processor() or None
 
 
+def python_loop_ms() -> float:
+    """Best of three runs of a fixed pure-Python loop: how fast this host runs the interpreter,
+    which is what bounds a step that waits on Python. Modal's sandbox hides the CPU model, so
+    this is the number that tells two containers apart."""
+    import time
+
+    best = float("inf")
+    for _ in range(3):
+        began = time.perf_counter()
+        table: dict[int, int] = {}
+        total = 0
+        for i in range(500_000):
+            table[i & 1023] = i
+            total += table[i & 1023]
+        best = min(best, time.perf_counter() - began)
+    return best * 1e3
+
+
 def environment() -> dict:
     """The device, the host CPU and the software stack, recorded with every result. A run on the
     wrong GPU or driver is not comparable to the baseline, and an engine whose steps are bound by
@@ -167,6 +185,7 @@ def environment() -> dict:
         "sms": props.multi_processor_count,
         "cpu": _cpu_model(),
         "cpus": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count(),
+        "python_loop_ms": round(python_loop_ms(), 1),
         "driver": smi[0] if smi else None,
         "max_sm_clock": smi[1] if len(smi) > 1 else None,
         "max_mem_clock": smi[2] if len(smi) > 2 else None,

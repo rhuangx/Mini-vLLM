@@ -81,7 +81,8 @@ def render(results: dict, baseline: dict | None = None, run: str = "") -> str:
             out.append(f"| {name} | **failed**: {r['error'][:200]} | | | | | | |")
             continue
         env = r.get("env", {})
-        cpu = f"{env['cpu']} ({env.get('cpus')} cores)" if env.get("cpu") else "-"
+        loop = env.get("python_loop_ms")
+        cpu = f"{env.get('cpus')} cores, Python loop {loop} ms" if loop else "-"
         stack = env.get("torch", "") + (f", vLLM {r['vllm_version']}" if r.get("vllm_version") else "")
         out.append(f"| {name} | {env.get('device')} | {cpu} | {env.get('driver')} | {stack} | "
                    f"{env.get('cuda')} | {_fmt(r.get('load_s'))} | {r.get('kv_blocks')} |")
