@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
+    from mini_vllm.engine.sequence import Request
     from mini_vllm.paged_kv_cache import BlockManager
-    from mini_vllm.scheduler import Request
 
 __all__ = ["PADDING_BLOCK", "ForwardBatch"]
 

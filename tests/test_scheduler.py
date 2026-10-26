@@ -8,11 +8,13 @@ import pytest
 import torch
 
 from mini_vllm.batch import ForwardBatch
+from mini_vllm.config import SchedulerConfig
+from mini_vllm.engine.scheduler import Scheduler
+from mini_vllm.engine.sequence import Request, RequestStatus
 from mini_vllm.generate import GREEDY, generate_with_kv_cache
 from mini_vllm.layers.sampler import sample
 from mini_vllm.models import from_hf
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
-from mini_vllm.scheduler import Request, RequestStatus, Scheduler, SchedulerConfig
 
 WHOLE = {"enable_chunked_prefill": False}
 

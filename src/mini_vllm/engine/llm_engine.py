@@ -10,54 +10,20 @@ from typing import Any
 import torch
 
 from mini_vllm.batch import ForwardBatch
+from mini_vllm.config import EngineConfig
+from mini_vllm.engine.scheduler import Scheduler, SchedulerOutput
+from mini_vllm.engine.sequence import Request, RequestStatus
 from mini_vllm.generate import GREEDY
 from mini_vllm.layers.sampler import sample
 from mini_vllm.models import DEFAULT_MODEL, load
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
 from mini_vllm.qwen3 import Qwen3Model
 from mini_vllm.sampling_parameters import SamplingParams
-from mini_vllm.scheduler import Request, RequestStatus, Scheduler, SchedulerConfig, SchedulerOutput
 from mini_vllm.speculative import DraftProposer, SpeculativeDecoder, self_draft
 from mini_vllm.utils import profiling
 from mini_vllm.utils.profiling import StepStats
 
-__all__ = ["LLM", "Completion", "EngineConfig", "StreamUpdate", "blocks_that_fit"]
-
-
-@dataclass(frozen=True)
-class EngineConfig:
-    """Everything the engine takes besides the model and tokenizer."""
-
-    # KV memory.
-    num_blocks: int | None = None   # None: kv_fraction of the memory left once the weights are in
-    block_size: int = 16            # tokens per page
-    kv_fraction: float = 0.5
-    fp8_kv_cache: bool = False      # e4m3 pages: half the bytes, so twice the tokens in flight
-    enable_prefix_caching: bool = False
-
-    # Scheduling.
-    max_batched_tokens: int = 2048
-    max_sequences: int = 32
-    chunk_size: int = 512
-    enable_chunked_prefill: bool = True
-    prefill_priority: bool = False
-
-    # Speculative decoding: k > 0 drafts k tokens per decode step for the target to verify.
-    num_speculative_tokens: int = 0
-    draft_model: str | None = None        # a separate checkpoint sharing the tokenizer, or
-    num_draft_layers: int | None = None   # None: a self-draft of the target's first N layers
-    draft_blocks: int | None = None       # None: the target's pool plus room for k per request
-
-    seed: int | None = None  # seeds torch's global RNG, CUDA included; greedy is deterministic anyway
-
-    def scheduler_config(self) -> SchedulerConfig:
-        return SchedulerConfig(
-            max_batched_tokens=self.max_batched_tokens,
-            max_sequences=self.max_sequences,
-            chunk_size=self.chunk_size,
-            enable_chunked_prefill=self.enable_chunked_prefill,
-            prefill_priority=self.prefill_priority,
-        )
+__all__ = ["LLM", "Completion", "StreamUpdate", "blocks_that_fit"]
 
 
 def blocks_that_fit(model: Qwen3Model, config: EngineConfig) -> int:

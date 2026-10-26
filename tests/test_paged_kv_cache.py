@@ -6,10 +6,10 @@ import torch
 from utils import assert_allclose, requires_cuda, with_and_without_cuda
 
 from mini_vllm.batch import ForwardBatch
+from mini_vllm.engine.sequence import Request
 from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
 from mini_vllm.layers.quantization import dequantize_fp8
 from mini_vllm.paged_kv_cache import BlockManager, BlockPool, BlockTable, PagedKvCache, PagedKvPool
-from mini_vllm.scheduler import Request
 
 
 def request(token_ids) -> Request:

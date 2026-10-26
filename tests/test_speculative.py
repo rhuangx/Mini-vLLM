@@ -6,10 +6,12 @@ import torch
 from test_engine import PROMPTS, assert_nothing_held, engine
 from utils import assert_allclose, requires_cuda
 
+from mini_vllm.config import SchedulerConfig
+from mini_vllm.engine.scheduler import Scheduler
+from mini_vllm.engine.sequence import Request
 from mini_vllm.generate import generate_with_kv_cache
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
 from mini_vllm.sampling_parameters import SamplingParams
-from mini_vllm.scheduler import Request, Scheduler, SchedulerConfig
 from mini_vllm.speculative import accept_proposals, residual_distribution
 
 # --- the rule -------------------------------------------------------------------------------

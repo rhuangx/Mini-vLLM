@@ -5,7 +5,8 @@ import pytest
 import torch
 from utils import with_and_without_cuda
 
-from mini_vllm.engine import LLM, EngineConfig
+from mini_vllm.config import EngineConfig
+from mini_vllm.engine.llm_engine import LLM
 from mini_vllm.generate import generate_with_kv_cache
 from mini_vllm.models import from_hf
 from mini_vllm.sampling_parameters import SamplingParams
@@ -192,7 +193,7 @@ def test_the_real_model_serves_text(real_llm):
 
 
 def test_default_pool_sizing_uses_the_memory_left(real_qwen3):
-    from mini_vllm.engine import blocks_that_fit
+    from mini_vllm.engine.llm_engine import blocks_that_fit
 
     model = from_hf(real_qwen3[0])
     c = model.config

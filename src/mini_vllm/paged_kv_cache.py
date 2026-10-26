@@ -15,7 +15,7 @@ from mini_vllm.prefix_cache import PrefixCache
 
 if TYPE_CHECKING:
     from mini_vllm.batch import ForwardBatch
-    from mini_vllm.scheduler import Request
+    from mini_vllm.engine.sequence import Request
 
 __all__ = ["BlockManager", "BlockPool", "BlockTable", "PagedKvCache", "PagedKvPool"]
 

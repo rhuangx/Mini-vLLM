@@ -8,10 +8,10 @@ from dataclasses import dataclass, replace
 import torch
 
 from mini_vllm.batch import ForwardBatch
+from mini_vllm.engine.sequence import Request
 from mini_vllm.layers.sampler import sampling_probabilities
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
 from mini_vllm.qwen3 import Qwen3Model
-from mini_vllm.scheduler import Request
 from mini_vllm.utils import profiling
 
 __all__ = [
