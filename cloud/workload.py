@@ -45,15 +45,12 @@ class Workload:
         return f"{self.kind}-{self.load.replace('/', '-per-').replace(' ', '-')}"
 
     def describe(self) -> str:
-        """The trace's shape in words, for a report heading."""
+        """Prompt and output lengths, for a report heading: "128 in, 512 out"."""
         if self.lognormal:
-            shape = f"lognormal lengths around {self.input_len} in and {self.output_len} out"
-        elif self.shared_prefix:
-            shape = (f"a {self.shared_prefix}-token preamble shared by every prompt plus {self.input_len} "
-                     f"unique tokens, {self.output_len}-token outputs")
-        else:
-            shape = f"{self.input_len}-token prompts, {self.output_len}-token outputs"
-        return f"{shape}, {'Poisson arrivals' if self.rate > 0 else 'a fixed number in flight'}"
+            return f"~{self.input_len} in, ~{self.output_len} out, lognormal"
+        if self.shared_prefix:
+            return f"{self.shared_prefix} shared + {self.input_len} in, {self.output_len} out"
+        return f"{self.input_len} in, {self.output_len} out"
 
     def requests(self) -> list[RequestSpec]:
         """The trace, identical on every run and for every engine. It is seeded by its parameters,

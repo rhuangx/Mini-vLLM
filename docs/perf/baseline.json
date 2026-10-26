@@ -47,7 +47,7 @@
           "seed": 0,
           "name": "decode-heavy-1-in-flight",
           "load": "1 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 4,
@@ -124,7 +124,7 @@
           "seed": 0,
           "name": "decode-heavy-2-in-flight",
           "load": "2 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 4,
@@ -201,7 +201,7 @@
           "seed": 0,
           "name": "decode-heavy-4-in-flight",
           "load": "4 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 8,
@@ -278,7 +278,7 @@
           "seed": 0,
           "name": "decode-heavy-8-in-flight",
           "load": "8 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 16,
@@ -355,7 +355,7 @@
           "seed": 0,
           "name": "decode-heavy-16-in-flight",
           "load": "16 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 32,
@@ -432,7 +432,7 @@
           "seed": 0,
           "name": "decode-heavy-32-in-flight",
           "load": "32 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 64,
@@ -509,7 +509,7 @@
           "seed": 0,
           "name": "decode-heavy-64-in-flight",
           "load": "64 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 128,
@@ -586,7 +586,7 @@
           "seed": 0,
           "name": "decode-heavy-128-in-flight",
           "load": "128 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 256,
@@ -663,7 +663,7 @@
           "seed": 0,
           "name": "decode-heavy-256-in-flight",
           "load": "256 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 512,
@@ -740,7 +740,7 @@
           "seed": 0,
           "name": "prefill-heavy-8-in-flight",
           "load": "8 in flight",
-          "description": "2048-token prompts, 16-token outputs, a fixed number in flight"
+          "description": "2048 in, 16 out"
         },
         "summary": {
           "requests": 32,
@@ -817,7 +817,7 @@
           "seed": 0,
           "name": "mixed-1-req-per-s",
           "load": "1 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 32,
@@ -894,7 +894,7 @@
           "seed": 0,
           "name": "mixed-2-req-per-s",
           "load": "2 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 40,
@@ -971,7 +971,7 @@
           "seed": 0,
           "name": "mixed-4-req-per-s",
           "load": "4 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 80,
@@ -1048,7 +1048,7 @@
           "seed": 0,
           "name": "mixed-8-req-per-s",
           "load": "8 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 128,
@@ -1125,7 +1125,7 @@
           "seed": 0,
           "name": "mixed-16-req-per-s",
           "load": "16 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 128,
@@ -1202,7 +1202,7 @@
           "seed": 0,
           "name": "shared-prefix-8-in-flight",
           "load": "8 in flight",
-          "description": "a 1024-token preamble shared by every prompt plus 64 unique tokens, 64-token outputs, a fixed number in flight"
+          "description": "1024 shared + 64 in, 64 out"
         },
         "summary": {
           "requests": 32,
@@ -1675,7 +1675,7 @@
           "seed": 0,
           "name": "decode-heavy-1-in-flight",
           "load": "1 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 4,
@@ -1752,7 +1752,7 @@
           "seed": 0,
           "name": "decode-heavy-16-in-flight",
           "load": "16 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 32,
@@ -2101,7 +2101,7 @@
           "seed": 0,
           "name": "decode-heavy-1-in-flight",
           "load": "1 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 4,
@@ -2148,7 +2148,7 @@
           "seed": 0,
           "name": "decode-heavy-2-in-flight",
           "load": "2 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 4,
@@ -2195,7 +2195,7 @@
           "seed": 0,
           "name": "decode-heavy-4-in-flight",
           "load": "4 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 8,
@@ -2242,7 +2242,7 @@
           "seed": 0,
           "name": "decode-heavy-8-in-flight",
           "load": "8 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 16,
@@ -2289,7 +2289,7 @@
           "seed": 0,
           "name": "decode-heavy-16-in-flight",
           "load": "16 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 32,
@@ -2336,7 +2336,7 @@
           "seed": 0,
           "name": "decode-heavy-32-in-flight",
           "load": "32 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 64,
@@ -2383,7 +2383,7 @@
           "seed": 0,
           "name": "decode-heavy-64-in-flight",
           "load": "64 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 128,
@@ -2430,7 +2430,7 @@
           "seed": 0,
           "name": "decode-heavy-128-in-flight",
           "load": "128 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 256,
@@ -2477,7 +2477,7 @@
           "seed": 0,
           "name": "decode-heavy-256-in-flight",
           "load": "256 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 512,
@@ -2524,7 +2524,7 @@
           "seed": 0,
           "name": "prefill-heavy-8-in-flight",
           "load": "8 in flight",
-          "description": "2048-token prompts, 16-token outputs, a fixed number in flight"
+          "description": "2048 in, 16 out"
         },
         "summary": {
           "requests": 32,
@@ -2571,7 +2571,7 @@
           "seed": 0,
           "name": "mixed-1-req-per-s",
           "load": "1 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 32,
@@ -2618,7 +2618,7 @@
           "seed": 0,
           "name": "mixed-2-req-per-s",
           "load": "2 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 40,
@@ -2665,7 +2665,7 @@
           "seed": 0,
           "name": "mixed-4-req-per-s",
           "load": "4 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 80,
@@ -2712,7 +2712,7 @@
           "seed": 0,
           "name": "mixed-8-req-per-s",
           "load": "8 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 128,
@@ -2759,7 +2759,7 @@
           "seed": 0,
           "name": "mixed-16-req-per-s",
           "load": "16 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 128,
@@ -2806,7 +2806,7 @@
           "seed": 0,
           "name": "shared-prefix-8-in-flight",
           "load": "8 in flight",
-          "description": "a 1024-token preamble shared by every prompt plus 64 unique tokens, 64-token outputs, a fixed number in flight"
+          "description": "1024 shared + 64 in, 64 out"
         },
         "summary": {
           "requests": 32,
@@ -2891,7 +2891,7 @@
           "seed": 0,
           "name": "decode-heavy-1-in-flight",
           "load": "1 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 4,
@@ -2938,7 +2938,7 @@
           "seed": 0,
           "name": "decode-heavy-2-in-flight",
           "load": "2 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 4,
@@ -2985,7 +2985,7 @@
           "seed": 0,
           "name": "decode-heavy-4-in-flight",
           "load": "4 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 8,
@@ -3032,7 +3032,7 @@
           "seed": 0,
           "name": "decode-heavy-8-in-flight",
           "load": "8 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 16,
@@ -3079,7 +3079,7 @@
           "seed": 0,
           "name": "decode-heavy-16-in-flight",
           "load": "16 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 32,
@@ -3126,7 +3126,7 @@
           "seed": 0,
           "name": "decode-heavy-32-in-flight",
           "load": "32 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 64,
@@ -3173,7 +3173,7 @@
           "seed": 0,
           "name": "decode-heavy-64-in-flight",
           "load": "64 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 128,
@@ -3220,7 +3220,7 @@
           "seed": 0,
           "name": "decode-heavy-128-in-flight",
           "load": "128 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 256,
@@ -3267,7 +3267,7 @@
           "seed": 0,
           "name": "decode-heavy-256-in-flight",
           "load": "256 in flight",
-          "description": "128-token prompts, 512-token outputs, a fixed number in flight"
+          "description": "128 in, 512 out"
         },
         "summary": {
           "requests": 512,
@@ -3314,7 +3314,7 @@
           "seed": 0,
           "name": "prefill-heavy-8-in-flight",
           "load": "8 in flight",
-          "description": "2048-token prompts, 16-token outputs, a fixed number in flight"
+          "description": "2048 in, 16 out"
         },
         "summary": {
           "requests": 32,
@@ -3361,7 +3361,7 @@
           "seed": 0,
           "name": "mixed-1-req-per-s",
           "load": "1 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 32,
@@ -3408,7 +3408,7 @@
           "seed": 0,
           "name": "mixed-2-req-per-s",
           "load": "2 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 40,
@@ -3455,7 +3455,7 @@
           "seed": 0,
           "name": "mixed-4-req-per-s",
           "load": "4 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 80,
@@ -3502,7 +3502,7 @@
           "seed": 0,
           "name": "mixed-8-req-per-s",
           "load": "8 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 128,
@@ -3549,7 +3549,7 @@
           "seed": 0,
           "name": "mixed-16-req-per-s",
           "load": "16 req/s",
-          "description": "lognormal lengths around 512 in and 128 out, Poisson arrivals"
+          "description": "~512 in, ~128 out, lognormal"
         },
         "summary": {
           "requests": 128,
@@ -3596,7 +3596,7 @@
           "seed": 0,
           "name": "shared-prefix-8-in-flight",
           "load": "8 in flight",
-          "description": "a 1024-token preamble shared by every prompt plus 64 unique tokens, 64-token outputs, a fixed number in flight"
+          "description": "1024 shared + 64 in, 64 out"
         },
         "summary": {
           "requests": 32,

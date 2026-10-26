@@ -1,129 +1,78 @@
-# Baseline: Qwen3-8B on one H100, before the refactor
+# Baseline: Qwen3-8B, one H100
 
-Every later phase of the refactor is measured against these numbers. The engine code is that of
-`028765a`. Phase 0 added only instrumentation and the measurement harness, and the run below was
-made at `a20dd43`.
+Engine `028765a`, measured at `a20dd43`. H100 80GB HBM3 (SXM), driver 610.57. Mini-vLLM: torch 2.14.1+cu130,
+kernels built for sm_90a. vLLM 0.31.0. Tests: 320/320 pass on the H100.
 
-- **Hardware:** Modal `gpu="H100!"`, an NVIDIA H100 80GB HBM3 (SXM, 3.35 TB/s), driver 610.57.04.
-- **Software:** Mini-vLLM on torch 2.14.1+cu130 with its CUDA extension built for sm_90a; vLLM 0.31.0
-  on torch 2.13.0+cu130.
-- **Correctness:** the full test suite passes on the H100, 320 passed with none skipped, including
-  every CUDA-kernel and real-Qwen3 test.
+## Setup
 
-## The four engines
-
-Each engine runs on its own H100 under the same limits:
-
-- 12,288 KV blocks of 16 tokens (196k tokens; vLLM gets exactly this through
-  `num_gpu_blocks_override`)
-- at most 256 sequences and 4,096 batched tokens, `max_model_len` 4,096
-- prefix caching on, bf16 weights, greedy sampling with EOS ignored
-
-| engine | what it is |
+| engine | |
 |---|---|
-| Mini-vLLM, CUDA kernels | Mini-vLLM with its hand-written kernels for RMSNorm, RoPE, SwiGLU, paged attention and prefill. No CUDA graphs and no `torch.compile`. |
-| Mini-vLLM, pure PyTorch | The same engine on its pure-PyTorch path, the oracle its kernels are tested against. It is measured only at 1 and 16 in flight, being about ten times slower. |
-| vLLM 0.31.0 | vLLM as shipped, with CUDA graphs and `torch.compile`: production speed. |
-| vLLM 0.31.0, eager | vLLM with `enforce_eager=True`, so no CUDA graphs and no compilation. This is the fair comparison for Mini-vLLM today, since Mini-vLLM has neither yet. |
+| Mini-vLLM CUDA | custom kernels, no CUDA graphs |
+| Mini-vLLM PyTorch | pure-PyTorch oracle; 1 and 16 in flight only |
+| vLLM | CUDA graphs + `torch.compile` |
+| vLLM eager | no graphs, no compile |
 
-vLLM's FlashInfer sampler is off because the image has no nvcc, and greedy requests never reach that
-sampler.
-
-## The workloads
-
-The prompts are random token ids, seeded by each trace's parameters, so every engine and every run
-sees the same requests.
-
-| workload | shape | load |
+| workload | in / out tokens | load |
 |---|---|---|
-| decode-heavy | 128-token prompts, 512-token outputs | 1, 2, 4 … 256 requests in flight; a new one starts as one finishes |
-| prefill-heavy | 2,048-token prompts, 16-token outputs | 8 in flight |
-| mixed | lognormal lengths around 512 in and 128 out | Poisson arrivals at 1, 2, 4, 8 and 16 requests/s |
-| shared-prefix | a 1,024-token preamble shared by every prompt, plus 64 unique tokens; 64-token outputs | 8 in flight |
+| decode-heavy | 128 / 512 | 1–256 in flight |
+| prefill-heavy | 2,048 / 16 | 8 in flight |
+| mixed | ~512 / ~128, lognormal | Poisson, 1–16 req/s |
+| shared-prefix | 1,024 shared + 64 / 64 | 8 in flight |
 
-One loop drives every engine (`cloud/workload.py`), and a token is timestamped when the step that
-made it returns.
-
-- **Time to first token:** counted from arrival, so it includes queueing.
-- **Time per output token:** (last token − first) / (n − 1), per request.
-- **Decode memory-bandwidth utilization:** (15.1 GB of weights + 144 KiB × context tokens) / step
-  time / 3.35 TB/s.
-
-Reproduce it from the repository root:
+All engines: 12,288 KV blocks × 16 tokens, ≤256 sequences, 4,096 batched tokens, bf16, greedy, prefix caching on.
+MBU = (15.1 GB weights + 144 KiB × context tokens) / step time / 3.35 TB/s.
 
 ```bash
 uv run --group cloud modal run -m cloud.app::sweep --suite full --engines mini-cuda,mini-torch,vllm,vllm-eager --tag baseline
 ```
 
-![Decode-heavy: output tokens/s and time per output token against requests in flight](baseline-decode-heavy.png)
+![Qwen3-8B decode, H100](baseline.png)
 
-## What the numbers say
+## Findings
 
-1. **At low concurrency, Mini-vLLM waits on kernel launches.**
-   - With 16 requests in flight, a decode step takes 20.3 ms. The GPU runs kernels for 8.9 ms of
-     it (44% busy), across 884 launches.
-   - The kernels themselves are fine: the GEMMs read 15.1 GB of weights in 6.3 ms, about 2.4 TB/s
-     or 72% of peak.
-   - Time per output token at one request is 11.4 ms, against 6.7 ms for vLLM and 17.8 ms for
-     vLLM eager.
-   - Next: CUDA graphs (Phase 8).
-2. **At high concurrency, attention is the bottleneck.**
-   - With 256 in flight, the GPU is 90% busy, and the paged attention kernel takes 29.1 of the
-     38.1 ms.
-   - It runs one 1,024-thread block per (token, query head), so every K/V tile is read once per
-     head in the GQA group of 4.
-   - Throughput is 3.8k tokens/s, against 16.3k for vLLM and 11.3k for vLLM eager.
-   - Memory-bandwidth utilization falls from 41% at 4 in flight to 14% at 256.
-   - Next: a GQA-packed Triton kernel (Phase 7), then split-K (Phase 9).
-3. **Long prefills stall decodes.**
-   - In the prefill-heavy workload, time to first token at p99 is 1,151 ms against 395 ms.
-   - Decodes that share a step with a 2,048-token prefill take 67 ms per token against 16 ms.
-   - Long chunks gather their pages and run `flash_prefill` one sequence at a time, from Python.
-   - Next: decode-first slicing (Phase 6) and a paged prefill kernel (Phase 7).
-4. **The prefix cache misses requests that run at the same time.**
-   - In the shared-prefix workload, time to first token at p50 is 120 ms against 30 ms.
-   - Mini-vLLM adds pages to the radix cache only when a request is freed, so the 8 requests in
-     flight at once each prefill the whole 1,024-token preamble.
-5. **The pure-PyTorch path is the oracle, not a contender.**
-   - Time per output token is 29 ms at one request and 132 ms at 16.
-   - It launches about 16k kernels a step, and the GPU is 15–24% busy.
+| metric | Mini-vLLM CUDA | vLLM | vLLM eager | cause → fix |
+|---|---|---|---|---|
+| decode-heavy, 1 in flight: TPOT (ms) | 11.4 | 6.7 | 17.8 | GPU 44% busy at 16 in flight, 884 launches/step → CUDA graphs (Phase 8) |
+| decode-heavy, 256 in flight: tok/s | 3.8k | 16.3k | 11.3k | paged attention 29 of 38 GPU ms; KV read once per head in each GQA group → Triton kernel (Phase 7), split-K (Phase 9) |
+| prefill-heavy: TTFT p99 (ms) | 1,151 | 395 | 407 | prefill runs one sequence at a time from Python → Phases 6, 7 |
+| prefill-heavy: TPOT p50 (ms) | 67 | 16 | 26 | decodes wait on those prefill steps |
+| shared-prefix: TTFT p50 (ms) | 120 | 30 | 61 | prefix cache filled only when a request frees |
 
-## How far one run can be trusted
+GEMMs reach 72% of peak bandwidth (15.1 GB in 6.3 ms); the gap is overhead around them.
+Mini-vLLM PyTorch: TPOT 29 ms at 1 in flight, 132 ms at 16; ~16k kernels/step.
 
-The same sweep was run twice, on two Modal containers. Where the GPU is the bottleneck, the two
-runs agreed; where Python overhead is the bottleneck, they did not. The tables compare only the
-workloads whose traces were identical in both runs.
+## Run-to-run variance
 
-| engine | change in throughput between the two runs |
+Same traces, two containers:
+
+| engine | tok/s change |
 |---|---|
-| vLLM 0.31.0 | within 1.5% everywhere |
-| Mini-vLLM, CUDA kernels | within 1% at 128 and 256 in flight, prefill-heavy and shared-prefix; −5% to +15% at 1–64 in flight |
-| vLLM 0.31.0, eager | −3% to −35% |
-| Mini-vLLM, pure PyTorch | +62% |
+| vLLM | ≤1.5% |
+| Mini-vLLM CUDA | ≤1% when GPU-bound (128+ in flight, prefill-heavy, shared-prefix); −5% to +15% at 1–64 in flight |
+| vLLM eager | −3% to −35% |
+| Mini-vLLM PyTorch | +62% |
 
-The host CPU sets the pace of a Python-bound step, and containers land on different hosts. Every
-run now records the host CPU model; this baseline predates that. So a ±3% regression check is
-only meaningful for GPU-bound points. Host-bound points need both sides measured in the same
-container, or the median of repeated runs.
+Python-bound steps track the host CPU. Compare them with a same-container A/B or the median of 3 runs. Runs now
+record the CPU model.
 
 ## Full tables
 
-Generated by `cloud/report.py` from [baseline.json](baseline.json).
+From [baseline.json](baseline.json).
 
 ### Environment
 
-| engine | device | host CPU | driver | torch | CUDA | load s | KV blocks |
+| engine | GPU | CPU | driver | torch | CUDA | load (s) | KV blocks |
 |---|---|---|---|---|---|---|---|
-| Mini-vLLM, CUDA kernels | NVIDIA H100 80GB HBM3 | not recorded | 610.57.04 | 2.14.1+cu130 | 13.0 | 10.2 | 12288 |
-| Mini-vLLM, pure PyTorch | NVIDIA H100 80GB HBM3 | not recorded | 610.57.04 | 2.14.1+cu130 | 13.0 | 8.4 | 12288 |
-| vLLM 0.31.0 | NVIDIA H100 80GB HBM3 | not recorded | 610.57.04 | 2.13.0+cu130 | 13.0 | 112.2 | 12288 |
-| vLLM 0.31.0, eager | NVIDIA H100 80GB HBM3 | not recorded | 610.57.04 | 2.13.0+cu130 | 13.0 | 45.9 | 12288 |
+| Mini-vLLM CUDA | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.14.1+cu130 | 13.0 | 10.2 | 12288 |
+| Mini-vLLM PyTorch | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.14.1+cu130 | 13.0 | 8.4 | 12288 |
+| vLLM | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.13.0+cu130, vLLM 0.31.0 | 13.0 | 112.2 | 12288 |
+| vLLM eager | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.13.0+cu130, vLLM 0.31.0 | 13.0 | 45.9 | 12288 |
 
-### Decode-heavy: 128-token prompts, 512-token outputs, a fixed number in flight
+### decode-heavy (128 in, 512 out)
 
-**Output tokens/s**
+**tok/s**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 87 | 35 | 148 | 56 |
 | 2 in flight | 174 | - | 295 | 112 |
@@ -135,9 +84,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 3,383 | - | 11,691 | 6,625 |
 | 256 in flight | 3,775 | - | 16,251 | 11,270 |
 
-**Time to first token, p50 ms**
+**TTFT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 15.0 | 28.6 | 11.7 | 39.1 |
 | 2 in flight | 27.6 | - | 13.7 | 49.7 |
@@ -149,9 +98,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 264.2 | - | 284.8 | 282.1 |
 | 256 in flight | 468.5 | - | 308.5 | 304.8 |
 
-**Time to first token, p99 ms**
+**TTFT p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 21.9 | 35.1 | 12.4 | 46.8 |
 | 2 in flight | 27.6 | - | 13.7 | 67.7 |
@@ -163,9 +112,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 1,005.4 | - | 411.3 | 430.8 |
 | 256 in flight | 2,058.8 | - | 833.2 | 883.2 |
 
-**Time per output token, p50 ms**
+**TPOT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 11.42 | 28.54 | 6.74 | 17.77 |
 | 2 in flight | 11.47 | - | 6.76 | 17.77 |
@@ -177,9 +126,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 37.26 | - | 10.37 | 19.03 |
 | 256 in flight | 66.87 | - | 15.10 | 21.92 |
 
-**Inter-token latency, p99 ms**
+**ITL p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 11.57 | 29.58 | 7.09 | 20.71 |
 | 2 in flight | 11.59 | - | 7.12 | 23.05 |
@@ -191,9 +140,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 47.38 | - | 23.49 | 21.77 |
 | 256 in flight | 236.86 | - | 34.27 | 29.94 |
 
-**Decode memory-bandwidth utilization %, estimated from ITL**
+**MBU % (from ITL)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 39.7 | 16.0 | 67.3 | 25.1 |
 | 2 in flight | 39.7 | - | 67.3 | 25.4 |
@@ -205,9 +154,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 18.4 | - | 67.5 | 36.0 |
 | 256 in flight | 13.6 | - | 62.0 | 40.8 |
 
-**Decode memory-bandwidth utilization %, Mini-vLLM's own forward GPU time (p50)**
+**MBU % (forward)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 41.2 | 16.2 | - | - |
 | 2 in flight | 41.3 | - | - | - |
@@ -219,9 +168,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 19.7 | - | - | - |
 | 256 in flight | 14.6 | - | - | - |
 
-**Decode memory-bandwidth utilization %, Mini-vLLM's whole step (p50)**
+**MBU % (step)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 39.8 | 16.0 | - | - |
 | 2 in flight | 39.8 | - | - | - |
@@ -233,43 +182,43 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 128 in flight | 18.6 | - | - | - |
 | 256 in flight | 13.8 | - | - | - |
 
-### Prefill-heavy: 2048-token prompts, 16-token outputs, a fixed number in flight
+### prefill-heavy (2048 in, 16 out)
 
-**Output tokens/s**
+**tok/s**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 96 | - | 259 | 202 |
 
-**Time to first token, p50 ms**
+**TTFT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 275.2 | - | 242.8 | 248.9 |
 
-**Time to first token, p99 ms**
+**TTFT p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 1,150.8 | - | 394.6 | 407.0 |
 
-**Time per output token, p50 ms**
+**TPOT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 67.34 | - | 16.40 | 26.34 |
 
-**Inter-token latency, p99 ms**
+**ITL p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 275.18 | - | 97.95 | 118.37 |
 
-### Mixed: lognormal lengths around 512 in and 128 out, Poisson arrivals
+### mixed (~512 in, ~128 out, lognormal)
 
-**Output tokens/s**
+**tok/s**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 110 | - | 113 | 106 |
 | 2 req/s | 295 | - | 322 | 267 |
@@ -277,9 +226,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 8 req/s | 905 | - | 1,048 | 902 |
 | 16 req/s | 1,139 | - | 1,957 | 1,403 |
 
-**Time to first token, p50 ms**
+**TTFT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 42.4 | - | 29.6 | 63.4 |
 | 2 req/s | 46.9 | - | 32.7 | 64.3 |
@@ -287,9 +236,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 8 req/s | 59.7 | - | 35.4 | 63.2 |
 | 16 req/s | 157.2 | - | 42.1 | 64.2 |
 
-**Time to first token, p99 ms**
+**TTFT p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 158.3 | - | 43.3 | 78.4 |
 | 2 req/s | 107.9 | - | 60.9 | 79.8 |
@@ -297,9 +246,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 8 req/s | 160.7 | - | 68.0 | 82.0 |
 | 16 req/s | 412.8 | - | 157.0 | 119.1 |
 
-**Time per output token, p50 ms**
+**TPOT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 11.71 | - | 6.80 | 17.56 |
 | 2 req/s | 12.28 | - | 6.98 | 17.47 |
@@ -307,9 +256,9 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 8 req/s | 21.63 | - | 7.84 | 17.51 |
 | 16 req/s | 51.96 | - | 9.73 | 18.11 |
 
-**Inter-token latency, p99 ms**
+**ITL p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 14.01 | - | 7.50 | 19.70 |
 | 2 req/s | 39.81 | - | 10.28 | 19.72 |
@@ -317,43 +266,43 @@ Generated by `cloud/report.py` from [baseline.json](baseline.json).
 | 8 req/s | 88.66 | - | 22.55 | 23.02 |
 | 16 req/s | 203.66 | - | 27.91 | 37.31 |
 
-### Shared-prefix: a 1024-token preamble shared by every prompt plus 64 unique tokens, 64-token outputs, a fixed number in flight
+### shared-prefix (1024 shared + 64 in, 64 out)
 
-**Output tokens/s**
+**tok/s**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 488 | - | 1,072 | 442 |
 
-**Time to first token, p50 ms**
+**TTFT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 120.0 | - | 30.2 | 60.6 |
 
-**Time to first token, p99 ms**
+**TTFT p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 490.7 | - | 45.7 | 64.4 |
 
-**Time per output token, p50 ms**
+**TPOT p50 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 13.99 | - | 7.06 | 17.39 |
 
-**Inter-token latency, p99 ms**
+**ITL p99 (ms)**
 
-| load | Mini-vLLM, CUDA kernels | Mini-vLLM, pure PyTorch | vLLM 0.31.0 | vLLM 0.31.0, eager |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 93.44 | - | 7.46 | 20.65 |
 
-### Profile: Mini-vLLM, CUDA kernels, decode 16 in flight
+### Profile: Mini-vLLM CUDA, decode-16-in-flight
 
-A step takes 20.33 ms, of which the GPU runs kernels for 8.90 ms (44% busy); 884 kernels per step, over 10 steps.
+Step 20.3 ms, GPU 8.9 ms (44% busy), 884 kernels.
 
-| GPU time by category | ms/step |
+| GPU category | ms/step |
 |---|---|
 | gemm | 6.258 |
 | attention | 1.877 |
@@ -374,7 +323,7 @@ A step takes 20.33 ms, of which the GPU runs kernels for 8.90 ms (44% busy); 884
 | spec.verify | 0.014 |
 | commit | 0.024 |
 
-| top kernel | category | ms/step | calls/step |
+| kernel | category | ms/step | calls |
 |---|---|---|---|
 | `nvjet_sm90_tst_64x16_64x16_4x1_v_bz_TNT` | gemm | 2.666 | 72 |
 | `void (anonymous namespace)::paged_attention_kernel<c10::BFloat16, c10::BFloat16>` | attention | 1.877 | 36 |
@@ -387,11 +336,11 @@ A step takes 20.33 ms, of which the GPU runs kernels for 8.90 ms (44% busy); 884
 | `void (anonymous namespace)::rope_kernel<c10::BFloat16>(c10::BFloat16 const*, int` | rope | 0.127 | 72 |
 | `void at::native::vectorized_elementwise_kernel<8, at::native::CUDAFunctor_add<c1` | elementwise | 0.118 | 72 |
 
-### Profile: Mini-vLLM, CUDA kernels, decode 256 in flight
+### Profile: Mini-vLLM CUDA, decode-256-in-flight
 
-A step takes 42.41 ms, of which the GPU runs kernels for 38.10 ms (90% busy); 704 kernels per step, over 10 steps.
+Step 42.4 ms, GPU 38.1 ms (90% busy), 704 kernels.
 
-| GPU time by category | ms/step |
+| GPU category | ms/step |
 |---|---|
 | attention | 29.131 |
 | gemm | 7.499 |
@@ -412,7 +361,7 @@ A step takes 42.41 ms, of which the GPU runs kernels for 38.10 ms (90% busy); 70
 | spec.verify | 0.023 |
 | commit | 0.145 |
 
-| top kernel | category | ms/step | calls/step |
+| kernel | category | ms/step | calls |
 |---|---|---|---|
 | `void (anonymous namespace)::paged_attention_kernel<c10::BFloat16, c10::BFloat16>` | attention | 29.131 | 36 |
 | `nvjet_sm90_tst_128x64_64x8_1x2_h_bz_TNT` | gemm | 3.199 | 108 |
@@ -425,11 +374,11 @@ A step takes 42.41 ms, of which the GPU runs kernels for 38.10 ms (90% busy); 70
 | `void (anonymous namespace)::swiglu_kernel<c10::BFloat16, mini_vllm::Vector<c10::` | activation | 0.205 | 36 |
 | `void (anonymous namespace)::paged_cache_update_kernel<c10::BFloat16>(int const*,` | kv_write | 0.140 | 72 |
 
-### Profile: Mini-vLLM, CUDA kernels, mixed
+### Profile: Mini-vLLM CUDA, mixed
 
-A step takes 29.18 ms, of which the GPU runs kernels for 19.28 ms (66% busy); 1,013 kernels per step, over 10 steps.
+Step 29.2 ms, GPU 19.3 ms (66% busy), 1,013 kernels.
 
-| GPU time by category | ms/step |
+| GPU category | ms/step |
 |---|---|
 | attention | 9.494 |
 | gemm | 7.891 |
@@ -450,7 +399,7 @@ A step takes 29.18 ms, of which the GPU runs kernels for 19.28 ms (66% busy); 1,
 | spec.verify | 0.015 |
 | commit | 0.078 |
 
-| top kernel | category | ms/step | calls/step |
+| kernel | category | ms/step | calls |
 |---|---|---|---|
 | `(anonymous namespace)::flash_prefill_kernel(__nv_bfloat16 const*, __nv_bfloat16 ` | attention | 4.819 | 14.4 |
 | `void (anonymous namespace)::paged_attention_kernel<c10::BFloat16, c10::BFloat16>` | attention | 4.675 | 36 |
@@ -463,11 +412,11 @@ A step takes 29.18 ms, of which the GPU runs kernels for 19.28 ms (66% busy); 1,
 | `void (anonymous namespace)::rms_norm_kernel<c10::BFloat16, mini_vllm::Vector<c10` | norm | 0.519 | 145 |
 | `nvjet_sm90_tst_128x144_64x6_2x1_v_bz_TNT` | gemm | 0.451 | 10.8 |
 
-### Profile: Mini-vLLM, pure PyTorch, decode 16 in flight
+### Profile: Mini-vLLM PyTorch, decode-16-in-flight
 
-A step takes 271.30 ms, of which the GPU runs kernels for 40.43 ms (15% busy); 15,975 kernels per step, over 10 steps.
+Step 271.3 ms, GPU 40.4 ms (15% busy), 15,975 kernels.
 
-| GPU time by category | ms/step |
+| GPU category | ms/step |
 |---|---|
 | copy | 17.222 |
 | elementwise | 11.522 |
@@ -485,7 +434,7 @@ A step takes 271.30 ms, of which the GPU runs kernels for 40.43 ms (15% busy); 1
 | spec.verify | 0.011 |
 | commit | 0.022 |
 
-| top kernel | category | ms/step | calls/step |
+| kernel | category | ms/step | calls |
 |---|---|---|---|
 | `void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<a` | copy | 5.389 | 1152 |
 | `void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda` | copy | 5.332 | 1945 |
@@ -498,11 +447,11 @@ A step takes 271.30 ms, of which the GPU runs kernels for 40.43 ms (15% busy); 1
 | `void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::f` | elementwise | 1.517 | 576 |
 | `nvjet_sm90_tst_64x16_64x16_2x1_v_bz_splitK_TNT` | gemm | 1.375 | 36 |
 
-### Profile: Mini-vLLM, pure PyTorch, mixed
+### Profile: Mini-vLLM PyTorch, mixed
 
-A step takes 260.23 ms, of which the GPU runs kernels for 62.30 ms (24% busy); 15,903 kernels per step, over 10 steps.
+Step 260.2 ms, GPU 62.3 ms (24% busy), 15,903 kernels.
 
-| GPU time by category | ms/step |
+| GPU category | ms/step |
 |---|---|
 | copy | 30.160 |
 | elementwise | 16.002 |
@@ -520,7 +469,7 @@ A step takes 260.23 ms, of which the GPU runs kernels for 62.30 ms (24% busy); 1
 | spec.verify | 0.012 |
 | commit | 0.080 |
 
-| top kernel | category | ms/step | calls/step |
+| kernel | category | ms/step | calls |
 |---|---|---|---|
 | `void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<a` | copy | 15.817 | 1152 |
 | `void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda` | copy | 6.555 | 1945 |

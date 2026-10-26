@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 ORDER = ["mini-cuda", "mini-triton", "mini-torch", "vllm", "vllm-eager"]
-BACKENDS = {"cuda": "CUDA kernels", "triton": "Triton kernels", "torch": "pure PyTorch"}
+BACKENDS = {"cuda": "CUDA", "triton": "Triton", "torch": "PyTorch"}
 
 
 def _labels(results: dict) -> list[str]:
@@ -18,13 +18,11 @@ def _labels(results: dict) -> list[str]:
 
 
 def engine_name(label: str, result: dict) -> str:
-    """What a result's engine is, in words: "Mini-vLLM, CUDA kernels", "vLLM 0.31.0, eager"."""
+    """"Mini-vLLM CUDA", "vLLM eager"; versions are in the environment table."""
     if result.get("engine") == "vllm" or label.startswith("vllm"):
-        version = result.get("vllm_version", "")
-        eager = result.get("enforce_eager", label.endswith("eager"))
-        return f"vLLM {version}".rstrip() + (", eager" if eager else "")
+        return "vLLM eager" if result.get("enforce_eager", label.endswith("eager")) else "vLLM"
     backend = result.get("backend") or label.removeprefix("mini-")
-    return f"Mini-vLLM, {BACKENDS.get(backend, backend)}"
+    return f"Mini-vLLM {BACKENDS.get(backend, backend)}"
 
 
 def _workload(result: dict, name: str) -> dict | None:
@@ -71,10 +69,10 @@ def render(results: dict, baseline: dict | None = None, run: str = "") -> str:
     labels = _labels(results)
     out = [f"# Sweep {run}".rstrip(), ""]
     if baseline:
-        out += ["Parenthesized: change against the baseline run.", ""]
+        out += ["(±%) = vs baseline.", ""]
 
     out += ["## Environment", "",
-            "| engine | device | host CPU | driver | torch | CUDA | load s | KV blocks |",
+            "| engine | GPU | CPU | driver | torch | CUDA | load (s) | KV blocks |",
             "|---|---|---|---|---|---|---|---|"]
     for label in labels:
         r = results[label]
@@ -83,8 +81,9 @@ def render(results: dict, baseline: dict | None = None, run: str = "") -> str:
             out.append(f"| {name} | **failed**: {r['error'][:200]} | | | | | | |")
             continue
         env = r.get("env", {})
-        cpu = f"{env['cpu']} ({env.get('cpus')} cores)" if env.get("cpu") else "not recorded"
-        out.append(f"| {name} | {env.get('device')} | {cpu} | {env.get('driver')} | {env.get('torch')} | "
+        cpu = f"{env['cpu']} ({env.get('cpus')} cores)" if env.get("cpu") else "-"
+        stack = env.get("torch", "") + (f", vLLM {r['vllm_version']}" if r.get("vllm_version") else "")
+        out.append(f"| {name} | {env.get('device')} | {cpu} | {env.get('driver')} | {stack} | "
                    f"{env.get('cuda')} | {_fmt(r.get('load_s'))} | {r.get('kv_blocks')} |")
     out.append("")
 
@@ -100,36 +99,28 @@ def render(results: dict, baseline: dict | None = None, run: str = "") -> str:
                 kind["rows"].append(row)
     for kind, section in kinds.items():
         rows = section["rows"]
-        heading = kind.capitalize()
-        out += [f"## {heading}" + (f": {section['description']}" if section["description"] else ""), ""]
-        out += _table(results, baseline, rows, "Output tokens/s", ("summary", "output_tok_s"), 0)
-        out += _table(results, baseline, rows, "Time to first token, p50 ms", ("summary", "ttft_ms", "p50"))
-        out += _table(results, baseline, rows, "Time to first token, p99 ms", ("summary", "ttft_ms", "p99"))
-        out += _table(results, baseline, rows, "Time per output token, p50 ms",
-                      ("summary", "tpot_ms", "p50"), 2)
-        out += _table(results, baseline, rows, "Inter-token latency, p99 ms", ("summary", "itl_ms", "p99"), 2)
+        out += [f"## {kind}" + (f" ({section['description']})" if section["description"] else ""), ""]
+        out += _table(results, baseline, rows, "tok/s", ("summary", "output_tok_s"), 0)
+        out += _table(results, baseline, rows, "TTFT p50 (ms)", ("summary", "ttft_ms", "p50"))
+        out += _table(results, baseline, rows, "TTFT p99 (ms)", ("summary", "ttft_ms", "p99"))
+        out += _table(results, baseline, rows, "TPOT p50 (ms)", ("summary", "tpot_ms", "p50"), 2)
+        out += _table(results, baseline, rows, "ITL p99 (ms)", ("summary", "itl_ms", "p99"), 2)
         if kind == "decode-heavy":
-            out += _table(results, baseline, rows,
-                          "Decode memory-bandwidth utilization %, estimated from ITL",
-                          ("mbu_estimate",), 1, 100)
-            out += _table(results, baseline, rows,
-                          "Decode memory-bandwidth utilization %, Mini-vLLM's own forward GPU time (p50)",
-                          ("steps", "forward_mbu", "p50"), 1, 100)
-            out += _table(results, baseline, rows,
-                          "Decode memory-bandwidth utilization %, Mini-vLLM's whole step (p50)",
-                          ("steps", "step_mbu", "p50"), 1, 100)
+            out += _table(results, baseline, rows, "MBU % (from ITL)", ("mbu_estimate",), 1, 100)
+            out += _table(results, baseline, rows, "MBU % (forward)", ("steps", "forward_mbu", "p50"), 1, 100)
+            out += _table(results, baseline, rows, "MBU % (step)", ("steps", "step_mbu", "p50"), 1, 100)
 
     for label in labels:
         for name, p in results[label].get("profiles", {}).items():
-            out += [f"## Profile: {engine_name(label, results[label])}, {name.replace('-', ' ')}", "",
-                    f"A step takes {_fmt(p.get('step_ms'), 2)} ms, of which the GPU runs kernels for "
-                    f"{_fmt(p['gpu_ms_per_step'], 2)} ms ({_fmt(100 * (p.get('gpu_busy') or 0), 0)}% busy); "
-                    f"{_fmt(p['kernels_per_step'], 0)} kernels per step, over {p['active_steps']} steps.", ""]
-            out += ["| GPU time by category | ms/step |", "|---|---|"]
+            out += [f"## Profile: {engine_name(label, results[label])}, {name}", "",
+                    f"Step {_fmt(p.get('step_ms'), 1)} ms, GPU {_fmt(p['gpu_ms_per_step'], 1)} ms "
+                    f"({_fmt(100 * (p.get('gpu_busy') or 0), 0)}% busy), "
+                    f"{_fmt(p['kernels_per_step'], 0)} kernels.", ""]
+            out += ["| GPU category | ms/step |", "|---|---|"]
             out += [f"| {k} | {v:.3f} |" for k, v in p["categories_ms_per_step"].items()]
             out += ["", "| host span | ms/step |", "|---|---|"]
             out += [f"| {k} | {v:.3f} |" for k, v in p["spans_ms_per_step"].items()]
-            out += ["", "| top kernel | category | ms/step | calls/step |", "|---|---|---|---|"]
+            out += ["", "| kernel | category | ms/step | calls |", "|---|---|---|---|"]
             out += [
                 f"| `{k['kernel'][:80]}` | {k['category']} | {k['ms_per_step']:.3f} "
                 f"| {k['calls_per_step']:g} |"
@@ -140,8 +131,7 @@ def render(results: dict, baseline: dict | None = None, run: str = "") -> str:
 
 
 def plot(results: dict, out_dir: Path) -> Path | None:
-    """Throughput and time per output token against requests in flight, for the decode-heavy
-    workload, one line per engine. Returns the file written, if any."""
+    """Decode-heavy tok/s and TPOT against requests in flight, a line per engine. Returns the file."""
     try:
         import matplotlib
 
@@ -151,7 +141,7 @@ def plot(results: dict, out_dir: Path) -> Path | None:
     except ImportError:
         return None
     figure, (left, right) = plt.subplots(1, 2, figsize=(11, 4.2))
-    description = None
+    plotted = False
     for label in _labels(results):
         decode_heavy = [w for w in results[label].get("workloads", [])
                         if w["workload"].get("kind") == "decode-heavy"
@@ -159,23 +149,23 @@ def plot(results: dict, out_dir: Path) -> Path | None:
         points = sorted((w["workload"]["concurrency"], w["summary"]["output_tok_s"],
                          w["summary"]["tpot_ms"]["p50"]) for w in decode_heavy)
         if points:
-            description = description or decode_heavy[0]["workload"].get("description")
+            plotted = True
             name = engine_name(label, results[label])
             left.plot([p[0] for p in points], [p[1] for p in points], marker="o", label=name)
             right.plot([p[0] for p in points], [p[2] for p in points], marker="o", label=name)
-    if description is None:
+    if not plotted:
         plt.close(figure)
         return None
     right.set_yscale("log")  # the pure-PyTorch path sits an order of magnitude above the rest
-    for axes, ylabel in ((left, "output tokens/s"), (right, "time per output token, p50 (ms)")):
+    for axes, ylabel in ((left, "tok/s"), (right, "TPOT p50 (ms)")):
         axes.set_xscale("log", base=2)
         axes.xaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x:g}"))  # 1, 2, 4, not 2^0
         axes.set_xlabel("requests in flight")
         axes.set_ylabel(ylabel)
         axes.grid(alpha=0.3)
         axes.legend()
-    figure.suptitle(f"Qwen3-8B on one H100, decode-heavy: {description}")
-    path = out_dir / "decode-heavy.png"
+    figure.suptitle("Qwen3-8B decode, H100")
+    path = out_dir / "decode.png"
     figure.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(figure)
     return path
