@@ -47,6 +47,8 @@ def vllm_image() -> modal.Image:
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("build-essential")
         .uv_pip_install(f"vllm=={VLLM_VERSION}")
-        .env({"HF_HOME": HF_HOME})
+        # FlashInfer's top-k/top-p sampler JIT-compiles with an nvcc this image does not have.
+        # Every workload is greedy, which never reaches that sampler, so its absence costs nothing.
+        .env({"HF_HOME": HF_HOME, "VLLM_USE_FLASHINFER_SAMPLER": "0"})
         .add_local_python_source("cloud")
     )
