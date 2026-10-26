@@ -15,7 +15,7 @@ from mini_vllm.engine.scheduler import Scheduler
 from mini_vllm.engine.sequence import Request, RequestStatus
 from mini_vllm.generate import GREEDY, generate_with_kv_cache
 from mini_vllm.layers.sampler import sample
-from mini_vllm.models import from_hf
+from mini_vllm.utils.loader import from_hf
 
 WHOLE = {"enable_chunked_prefill": False}
 

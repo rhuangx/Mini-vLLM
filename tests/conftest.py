@@ -11,7 +11,8 @@ import torch
 from huggingface_hub import try_to_load_from_cache
 from transformers import AutoModelForCausalLM, AutoTokenizer, Qwen3Config, Qwen3ForCausalLM
 
-from mini_vllm.models import DEFAULT_MODEL, Tokenizer, _eos_token_ids
+from mini_vllm.utils.loader import DEFAULT_MODEL
+from mini_vllm.utils.tokenizer import Tokenizer, eos_token_ids
 
 SEED = 1234
 
@@ -78,4 +79,4 @@ def real_qwen3():
         pytest.skip(f"{DEFAULT_MODEL} is not in the Hugging Face cache")
     model = AutoModelForCausalLM.from_pretrained(DEFAULT_MODEL, dtype=torch.bfloat16).cuda().eval()
     tokenizer = AutoTokenizer.from_pretrained(DEFAULT_MODEL)
-    return model, Tokenizer(tokenizer, _eos_token_ids(model, tokenizer))
+    return model, Tokenizer(tokenizer, eos_token_ids(model, tokenizer))

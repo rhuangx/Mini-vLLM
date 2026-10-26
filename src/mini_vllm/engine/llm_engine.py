@@ -18,10 +18,10 @@ from mini_vllm.engine.sequence import Request, RequestStatus
 from mini_vllm.engine.speculative import DraftProposer, SpeculativeDecoder, self_draft
 from mini_vllm.generate import GREEDY
 from mini_vllm.layers.sampler import sample
-from mini_vllm.models import DEFAULT_MODEL, load
-from mini_vllm.qwen3 import Qwen3Model
+from mini_vllm.models.qwen3 import Qwen3Model
 from mini_vllm.sampling_parameters import SamplingParams
 from mini_vllm.utils import profiling
+from mini_vllm.utils.loader import DEFAULT_MODEL, load
 from mini_vllm.utils.profiling import StepStats
 
 __all__ = ["LLM", "Completion", "StreamUpdate", "blocks_that_fit"]

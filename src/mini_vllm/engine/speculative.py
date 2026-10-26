@@ -12,7 +12,7 @@ from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
 from mini_vllm.engine.sequence import Request
 from mini_vllm.layers.sampler import sampling_probabilities
-from mini_vllm.qwen3 import Qwen3Model
+from mini_vllm.models.qwen3 import Qwen3Model
 from mini_vllm.utils import profiling
 
 __all__ = [

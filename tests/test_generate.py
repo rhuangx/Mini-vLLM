@@ -5,8 +5,8 @@ import torch
 from utils import with_and_without_cuda
 
 from mini_vllm.generate import generate_with_kv_cache, simple_generate
-from mini_vllm.models import from_hf
 from mini_vllm.reference.kv_cache import KvFullCache
+from mini_vllm.utils.loader import from_hf
 
 # Logits for Qwen3's top tokens sit in [16, 32), where one bf16 step is 0.125: a greedy choice
 # decided by less than two steps is a tie that rounding alone can flip.

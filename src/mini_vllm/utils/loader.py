@@ -7,49 +7,16 @@ from typing import Any
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from mini_vllm.config import ModelConfig
 from mini_vllm.layers.embedding_head import Embedding
 from mini_vllm.layers.layernorm import RMSNorm
 from mini_vllm.layers.rotary_embedding import RoPE
-from mini_vllm.qwen3 import ModelConfig, Qwen3MLP, Qwen3Model, Qwen3MultiHeadAttention, Qwen3TransformerBlock
+from mini_vllm.models.qwen3 import Qwen3MLP, Qwen3Model, Qwen3MultiHeadAttention, Qwen3TransformerBlock
+from mini_vllm.utils.tokenizer import Tokenizer, eos_token_ids
 
-__all__ = ["DEFAULT_MODEL", "Tokenizer", "from_hf", "load"]
+__all__ = ["DEFAULT_MODEL", "from_hf", "load"]
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
-
-
-class Tokenizer:
-    """The slice of a Hugging Face tokenizer the engine and the benches use.
-
-    eos_token_ids is a plain list so a bench can disable stopping by assigning []. encode,
-    decode and vocab forward to the wrapped tokenizer; len(tokenizer.vocab) is the vocabulary.
-    """
-
-    def __init__(self, tokenizer: Any, eos_token_ids: list[int] | None = None) -> None:
-        self._tokenizer = tokenizer
-        if eos_token_ids is None:
-            eos = tokenizer.eos_token_id
-            eos_token_ids = [] if eos is None else [eos] if isinstance(eos, int) else list(eos)
-        self.eos_token_ids = eos_token_ids
-
-    def encode(self, text: str, **kwargs: Any) -> list[int]:
-        return self._tokenizer.encode(text, **kwargs)
-
-    def decode(self, ids, **kwargs: Any) -> str:
-        return self._tokenizer.decode(ids, **kwargs)
-
-    @property
-    def vocab(self) -> dict:
-        return self._tokenizer.get_vocab()
-
-
-def _eos_token_ids(model: Any, tokenizer: Any) -> list[int]:
-    """generation_config.eos_token_id, which may be one id or several."""
-    eos = model.generation_config.eos_token_id
-    if eos is None:
-        eos = tokenizer.eos_token_id
-    if eos is None:
-        return []
-    return [eos] if isinstance(eos, int) else list(eos)
 
 
 def _frozen(weight: torch.Tensor) -> torch.Tensor:
@@ -115,7 +82,7 @@ def load(model: str = DEFAULT_MODEL, use_cuda: bool = False) -> tuple[Qwen3Model
     device = "cuda" if torch.cuda.is_available() else "cpu"
     hf_model = AutoModelForCausalLM.from_pretrained(model, dtype=torch.bfloat16).to(device)
     hf_tokenizer = AutoTokenizer.from_pretrained(model)
-    tokenizer = Tokenizer(hf_tokenizer, _eos_token_ids(hf_model, hf_tokenizer))
+    tokenizer = Tokenizer(hf_tokenizer, eos_token_ids(hf_model, hf_tokenizer))
     qwen3 = from_hf(hf_model, use_cuda)
     # The transplanted weights keep the storage alive; the module itself is not needed.
     del hf_model

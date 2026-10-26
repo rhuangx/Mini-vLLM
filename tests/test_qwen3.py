@@ -9,8 +9,8 @@ from mini_vllm.engine.block_manager import BlockManager
 from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
 from mini_vllm.engine.sequence import Request
-from mini_vllm.models import from_hf
 from mini_vllm.reference.kv_cache import KvFullCache
+from mini_vllm.utils.loader import from_hf
 
 
 def caches_for(model):

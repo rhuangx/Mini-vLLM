@@ -7,7 +7,7 @@ from collections.abc import Collection
 import torch
 
 from mini_vllm.layers.sampler import sample
-from mini_vllm.qwen3 import Qwen3Model
+from mini_vllm.models.qwen3 import Qwen3Model
 from mini_vllm.reference.kv_cache import KvFullCache
 from mini_vllm.sampling_parameters import SamplingParams
 

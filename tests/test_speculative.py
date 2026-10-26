@@ -213,7 +213,7 @@ def test_sampled_speculation_replays_under_a_seed_and_leaks_nothing(tiny_qwen3):
 
 @requires_cuda
 def test_greedy_speculation_on_the_kernels_changes_no_token(tiny_qwen3):
-    from mini_vllm.models import from_hf
+    from mini_vllm.utils.loader import from_hf
 
     llm = engine(tiny_qwen3, use_cuda=True, num_speculative_tokens=3, num_draft_layers=1, num_blocks=14,
                  max_batched_tokens=16)

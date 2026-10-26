@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 import torch
 
+from mini_vllm.config import ModelConfig
 from mini_vllm.engine.kv_cache import PagedKvCache
 from mini_vllm.layers.activation import swiglu
 from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
@@ -19,44 +17,7 @@ from mini_vllm.reference.kv_cache import KvFullCache
 # What a layer attends through: a dense history, or one layer's view of a paged batch.
 Cache = KvFullCache | PagedKvCache
 
-__all__ = ["ModelConfig", "Qwen3MLP", "Qwen3Model", "Qwen3MultiHeadAttention", "Qwen3TransformerBlock"]
-
-
-@dataclass(frozen=True)
-class ModelConfig:
-    """The shape of a Qwen3 checkpoint, read off a transformers config."""
-
-    vocab_size: int               # V
-    hidden_size: int              # E
-    num_hidden_layers: int
-    num_attention_heads: int      # H_q
-    num_key_value_heads: int      # H_k
-    head_dim: int                 # D; note H_q * D != E in Qwen3
-    intermediate_size: int
-    rms_norm_eps: float
-    rope_theta: float
-    max_position_embeddings: int
-    tie_word_embeddings: bool
-
-    @classmethod
-    def from_hf_config(cls, config: Any) -> ModelConfig:
-        # transformers 5 stores the base in rope_parameters; older configs used rope_theta.
-        rope = getattr(config, "rope_parameters", None) or {}
-        theta = rope.get("rope_theta", getattr(config, "rope_theta", 1_000_000.0))
-        head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
-        return cls(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_hidden_layers=config.num_hidden_layers,
-            num_attention_heads=config.num_attention_heads,
-            num_key_value_heads=config.num_key_value_heads,
-            head_dim=head_dim,
-            intermediate_size=config.intermediate_size,
-            rms_norm_eps=config.rms_norm_eps,
-            rope_theta=theta,
-            max_position_embeddings=config.max_position_embeddings,
-            tie_word_embeddings=config.tie_word_embeddings,
-        )
+__all__ = ["Qwen3MLP", "Qwen3Model", "Qwen3MultiHeadAttention", "Qwen3TransformerBlock"]
 
 
 class Qwen3MultiHeadAttention:

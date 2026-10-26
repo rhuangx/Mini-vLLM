@@ -70,11 +70,11 @@ def main() -> None:
         gc.collect()
         torch.cuda.empty_cache()
 
-        _hf_generate(hf_model, tokenizer._tokenizer, [[1] * 32] * 2, 4)  # warm-up
+        _hf_generate(hf_model, tokenizer.hf, [[1] * 32] * 2, 4)  # warm-up
         for concurrency in args.concurrency:
             prompts = random_prompts(2 * concurrency, args.prompt_lens, len(tokenizer.vocab))
             start = time.perf_counter()
-            tokens = _hf_generate(hf_model, tokenizer._tokenizer, prompts, args.max_tokens)
+            tokens = _hf_generate(hf_model, tokenizer.hf, prompts, args.max_tokens)
             rows[concurrency]["transformers generate"] = tokens / (time.perf_counter() - start)
 
         labels = list(rows[args.concurrency[0]])

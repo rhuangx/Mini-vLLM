@@ -23,7 +23,7 @@ from matplotlib.figure import Figure
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from mini_vllm import LLM, EngineConfig, StreamUpdate, from_hf
-from mini_vllm.models import Tokenizer, _eos_token_ids
+from mini_vllm.utils.tokenizer import Tokenizer, eos_token_ids
 
 try:
     import mini_vllm_ext  # noqa: F401
@@ -191,7 +191,7 @@ def load_hf(model: str) -> tuple[Any, Tokenizer]:
     weights from. EOS is disabled, so every engine runs every request to max_tokens."""
     hf_model = AutoModelForCausalLM.from_pretrained(model, dtype=torch.bfloat16).cuda().eval()
     hf_tokenizer = AutoTokenizer.from_pretrained(model)
-    tokenizer = Tokenizer(hf_tokenizer, _eos_token_ids(hf_model, hf_tokenizer))
+    tokenizer = Tokenizer(hf_tokenizer, eos_token_ids(hf_model, hf_tokenizer))
     tokenizer.eos_token_ids = []
     return hf_model, tokenizer
 
