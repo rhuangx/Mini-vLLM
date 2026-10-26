@@ -7,9 +7,9 @@ from typing import Any
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from mini_vllm.embedding import Embedding
-from mini_vllm.layer_norm import RMSNorm
-from mini_vllm.positional_encoding import RoPE
+from mini_vllm.layers.embedding_head import Embedding
+from mini_vllm.layers.layernorm import RMSNorm
+from mini_vllm.layers.rotary_embedding import RoPE
 from mini_vllm.qwen3 import ModelConfig, Qwen3MLP, Qwen3Model, Qwen3MultiHeadAttention, Qwen3TransformerBlock
 
 __all__ = ["DEFAULT_MODEL", "Tokenizer", "from_hf", "load"]

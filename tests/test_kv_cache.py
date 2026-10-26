@@ -2,7 +2,7 @@
 
 import torch
 
-from mini_vllm.kv_cache import KvFullCache
+from mini_vllm.reference.kv_cache import KvFullCache
 
 
 def test_the_dense_cache_appends_like_concat():

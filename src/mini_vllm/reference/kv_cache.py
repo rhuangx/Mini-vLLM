@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from mini_vllm.attention import scaled_dot_product_attention_grouped
+from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
 
 __all__ = ["KvFullCache"]
 

@@ -7,13 +7,14 @@ from typing import Any
 
 import torch
 
-from mini_vllm.attention import scaled_dot_product_attention_grouped
-from mini_vllm.basics import linear, swiglu
-from mini_vllm.embedding import Embedding
-from mini_vllm.kv_cache import KvFullCache
-from mini_vllm.layer_norm import RMSNorm
+from mini_vllm.layers.activation import swiglu
+from mini_vllm.layers.attention import scaled_dot_product_attention_grouped
+from mini_vllm.layers.embedding_head import Embedding
+from mini_vllm.layers.layernorm import RMSNorm
+from mini_vllm.layers.linear import linear
+from mini_vllm.layers.rotary_embedding import RoPE
 from mini_vllm.paged_kv_cache import PagedKvCache
-from mini_vllm.positional_encoding import RoPE
+from mini_vllm.reference.kv_cache import KvFullCache
 
 # What a layer attends through: a dense history, or one layer's view of a paged batch.
 Cache = KvFullCache | PagedKvCache

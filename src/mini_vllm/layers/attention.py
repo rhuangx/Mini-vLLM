@@ -6,8 +6,8 @@ import math
 
 import torch
 
-from mini_vllm.basics import softmax
-from mini_vllm.quantize import dequantize_fp8
+from mini_vllm.layers.activation import softmax
+from mini_vllm.layers.quantization import dequantize_fp8
 
 __all__ = ["causal_mask", "paged_attention", "scaled_dot_product_attention_grouped"]
 

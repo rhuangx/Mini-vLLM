@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from utils import DTYPES, assert_allclose, requires_cuda
 
-from mini_vllm.layer_norm import RMSNorm
+from mini_vllm.layers.layernorm import RMSNorm
 
 
 @pytest.mark.parametrize("dtype", DTYPES)

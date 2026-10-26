@@ -4,7 +4,7 @@ import pytest
 import torch
 from utils import DTYPES, assert_allclose
 
-from mini_vllm.embedding import Embedding
+from mini_vllm.layers.embedding_head import Embedding
 
 
 @pytest.mark.parametrize("dtype", DTYPES)

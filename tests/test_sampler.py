@@ -6,7 +6,8 @@ import pytest
 import torch
 from utils import assert_allclose
 
-from mini_vllm.sampler import SamplingParams, sample, sampling_probabilities
+from mini_vllm.layers.sampler import sample, sampling_probabilities
+from mini_vllm.sampling_parameters import SamplingParams
 
 # Probabilities 0.5, 0.3, 0.15, 0.05, stored out of rank order to exercise the sort.
 PROBABILITIES = [0.15, 0.5, 0.05, 0.3]

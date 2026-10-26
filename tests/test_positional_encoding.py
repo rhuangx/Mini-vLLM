@@ -7,7 +7,7 @@ import torch
 from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb
 from utils import DTYPES, assert_allclose, requires_cuda
 
-from mini_vllm.positional_encoding import RoPE
+from mini_vllm.layers.rotary_embedding import RoPE
 
 THETA = 1_000_000.0
 

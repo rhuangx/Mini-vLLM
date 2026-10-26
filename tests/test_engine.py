@@ -8,7 +8,7 @@ from utils import with_and_without_cuda
 from mini_vllm.engine import LLM, EngineConfig
 from mini_vllm.generate import generate_with_kv_cache
 from mini_vllm.models import from_hf
-from mini_vllm.sampler import SamplingParams
+from mini_vllm.sampling_parameters import SamplingParams
 
 
 class LetterTokenizer:

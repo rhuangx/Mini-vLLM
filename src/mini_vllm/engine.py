@@ -11,10 +11,11 @@ import torch
 
 from mini_vllm.batch import ForwardBatch
 from mini_vllm.generate import GREEDY
+from mini_vllm.layers.sampler import sample
 from mini_vllm.models import DEFAULT_MODEL, load
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
 from mini_vllm.qwen3 import Qwen3Model
-from mini_vllm.sampler import SamplingParams, sample
+from mini_vllm.sampling_parameters import SamplingParams
 from mini_vllm.scheduler import Request, RequestStatus, Scheduler, SchedulerConfig, SchedulerOutput
 from mini_vllm.speculative import DraftProposer, SpeculativeDecoder, self_draft
 from mini_vllm.utils import profiling

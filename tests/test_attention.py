@@ -8,8 +8,8 @@ import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from utils import DTYPES, assert_allclose, requires_cuda
 
-from mini_vllm.attention import causal_mask, paged_attention, scaled_dot_product_attention_grouped
-from mini_vllm.quantize import dequantize_fp8, quantize_fp8
+from mini_vllm.layers.attention import causal_mask, paged_attention, scaled_dot_product_attention_grouped
+from mini_vllm.layers.quantization import dequantize_fp8, quantize_fp8
 
 HEAD_DIM = 64
 

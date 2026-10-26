@@ -5,7 +5,8 @@ import torch
 import torch.nn.functional as F
 from utils import DTYPES, assert_allclose, requires_cuda
 
-from mini_vllm.basics import linear, silu, softmax, swiglu
+from mini_vllm.layers.activation import silu, softmax, swiglu
+from mini_vllm.layers.linear import linear
 
 
 @pytest.mark.parametrize("dtype", DTYPES)

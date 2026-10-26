@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from mini_vllm.basics import linear
+from mini_vllm.layers.linear import linear
 
 __all__ = ["Embedding"]
 

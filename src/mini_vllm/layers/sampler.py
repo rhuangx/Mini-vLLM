@@ -3,28 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 import torch
 
-from mini_vllm.basics import softmax
+from mini_vllm.layers.activation import softmax
+from mini_vllm.sampling_parameters import SamplingParams
 
-__all__ = ["SamplingParams", "sample", "sampling_probabilities"]
-
-
-@dataclass(frozen=True)
-class SamplingParams:
-    """One request's sampling configuration; temperature=0 is greedy, top_k=0 and top_p=1
-    disable truncation."""
-
-    temperature: float = 1.0
-    top_k: int = 0
-    top_p: float = 1.0
-    n: int = 1  # completions per prompt: one prefill, then n branches sharing its pages
-
-    @property
-    def is_greedy(self) -> bool:
-        return self.temperature == 0.0
+__all__ = ["sample", "sampling_probabilities"]
 
 
 # SamplingParams is frozen, so every caller can share one default instance.

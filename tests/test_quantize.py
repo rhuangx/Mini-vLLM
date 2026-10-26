@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from mini_vllm.quantize import FP8_MAX, dequantize_fp8, quantize_fp8
+from mini_vllm.layers.quantization import FP8_MAX, dequantize_fp8, quantize_fp8
 
 
 @pytest.mark.parametrize("scale", [1.0, 0.05])

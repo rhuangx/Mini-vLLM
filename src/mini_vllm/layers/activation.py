@@ -1,18 +1,10 @@
-"""The primitives every other operator is built from: linear, softmax, silu, swiglu."""
+"""Activations: softmax, silu, and the SwiGLU that gates Qwen3's MLP."""
 
 from __future__ import annotations
 
 import torch
 
-__all__ = ["linear", "silu", "softmax", "swiglu"]
-
-
-def linear(x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
-    """y = x @ w.T (+ bias), with w stored O x I as the checkpoint keeps it."""
-    out = x @ w.T
-    if bias is not None:
-        out = out + bias
-    return out
+__all__ = ["silu", "softmax", "swiglu"]
 
 
 def softmax(x: torch.Tensor, axis: int = -1) -> torch.Tensor:

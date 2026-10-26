@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from mini_vllm.attention import paged_attention
+from mini_vllm.layers.attention import paged_attention
+from mini_vllm.layers.quantization import quantize_fp8
 from mini_vllm.prefix_cache import PrefixCache
-from mini_vllm.quantize import quantize_fp8
 
 if TYPE_CHECKING:
     from mini_vllm.batch import ForwardBatch

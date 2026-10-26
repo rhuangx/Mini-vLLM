@@ -6,9 +6,9 @@ from conftest import make_tiny_qwen3
 from utils import assert_allclose
 
 from mini_vllm.batch import ForwardBatch
-from mini_vllm.kv_cache import KvFullCache
 from mini_vllm.models import from_hf
 from mini_vllm.paged_kv_cache import BlockManager, PagedKvPool
+from mini_vllm.reference.kv_cache import KvFullCache
 from mini_vllm.scheduler import Request
 
 

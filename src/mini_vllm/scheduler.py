@@ -9,7 +9,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from mini_vllm.paged_kv_cache import BlockManager, BlockTable
-from mini_vllm.sampler import SamplingParams
+from mini_vllm.sampling_parameters import SamplingParams
 
 __all__ = ["Request", "RequestStatus", "Scheduler", "SchedulerConfig", "SchedulerOutput"]
 

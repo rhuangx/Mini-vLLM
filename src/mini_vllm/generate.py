@@ -6,9 +6,10 @@ from collections.abc import Collection
 
 import torch
 
-from mini_vllm.kv_cache import KvFullCache
+from mini_vllm.layers.sampler import sample
 from mini_vllm.qwen3 import Qwen3Model
-from mini_vllm.sampler import SamplingParams, sample
+from mini_vllm.reference.kv_cache import KvFullCache
+from mini_vllm.sampling_parameters import SamplingParams
 
 __all__ = ["GREEDY", "generate_with_kv_cache", "simple_generate"]
 
