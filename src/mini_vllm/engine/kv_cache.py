@@ -59,9 +59,8 @@ class PagedKvPool:
     ) -> None:
         """Scatter key/value [T, H_k, D] into the slots slot_mapping names, in place, so the
         pool tensors are never rebound; fp8 pools quantize on the way in."""
-        backend = get_backend(backend)
-        backend.write_kv(self.keys[layer], slot_mapping, key, self.k_scale if self.fp8 else None)
-        backend.write_kv(self.values[layer], slot_mapping, value, self.v_scale if self.fp8 else None)
+        scales = (self.k_scale, self.v_scale) if self.fp8 else None
+        get_backend(backend).write_kv(self.keys[layer], self.values[layer], slot_mapping, key, value, scales)
 
     def pages(self, layer: int) -> tuple[torch.Tensor, torch.Tensor]:
         """One layer's keys and values as num_blocks x P x H_k x D."""

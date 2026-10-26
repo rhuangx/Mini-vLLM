@@ -63,10 +63,16 @@ class Backend(Protocol):
         ...
 
     def write_kv(
-        self, pages: torch.Tensor, slot_mapping: torch.Tensor, values: torch.Tensor, scale: float | None
+        self,
+        key_pages: torch.Tensor,
+        value_pages: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        fp8_scales: tuple[float, float] | None = None,
     ) -> None:
-        """Scatter values [T, H_k, D] into pages' slots in place; quantized to fp8 when
-        scale is given, raw otherwise."""
+        """Scatter key and value [T, H_k, D] into their pages' slots, in place; quantized to
+        fp8 with (k_scale, v_scale) when fp8_scales is given, raw otherwise."""
         ...
 
 

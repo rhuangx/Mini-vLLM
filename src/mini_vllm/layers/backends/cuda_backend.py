@@ -127,10 +127,18 @@ class CudaBackend(TorchBackend):
         return torch.cat(outputs, dim=0)
 
     def write_kv(
-        self, pages: torch.Tensor, slot_mapping: torch.Tensor, values: torch.Tensor, scale: float | None
+        self,
+        key_pages: torch.Tensor,
+        value_pages: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        fp8_scales: tuple[float, float] | None = None,
     ) -> None:
         """In place, as the pure path is: the kernels quantize to fp8 in the same pass."""
-        if scale is not None:
-            self.ext.kv_quantize_scatter(pages, slot_mapping, values, scale)
+        if fp8_scales is not None:
+            self.ext.kv_quantize_scatter(key_pages, slot_mapping, key, fp8_scales[0])
+            self.ext.kv_quantize_scatter(value_pages, slot_mapping, value, fp8_scales[1])
         else:
-            self.ext.paged_cache_update(pages, slot_mapping, values)
+            self.ext.paged_cache_update(key_pages, slot_mapping, key)
+            self.ext.paged_cache_update(value_pages, slot_mapping, value)

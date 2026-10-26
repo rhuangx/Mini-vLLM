@@ -53,8 +53,16 @@ class TorchBackend:
         )
 
     def write_kv(
-        self, pages: torch.Tensor, slot_mapping: torch.Tensor, values: torch.Tensor, scale: float | None
+        self,
+        key_pages: torch.Tensor,
+        value_pages: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        fp8_scales: tuple[float, float] | None = None,
     ) -> None:
-        if scale is not None:
-            values = quantize_fp8(values, scale)
-        pages.index_copy_(0, slot_mapping.long(), values.to(pages.dtype))
+        if fp8_scales is not None:
+            key, value = quantize_fp8(key, fp8_scales[0]), quantize_fp8(value, fp8_scales[1])
+        slots = slot_mapping.long()  # once for both: index_copy_ wants int64
+        key_pages.index_copy_(0, slots, key.to(key_pages.dtype))
+        value_pages.index_copy_(0, slots, value.to(value_pages.dtype))
