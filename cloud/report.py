@@ -106,9 +106,9 @@ def render(results: dict, baseline: dict | None = None, run: str = "") -> str:
     for label in labels:
         for name, p in results[label].get("profiles", {}).items():
             out += [f"## Profile: {label} / {name}", "",
-                    f"GPU {_fmt(p['gpu_ms_per_step'], 2)} ms/step, "
-                    f"{_fmt(p['kernels_per_step'], 0)} kernels/step "
-                    f"over {p['active_steps']} steps.", ""]
+                    f"A step takes {_fmt(p.get('step_ms'), 2)} ms, of which the GPU runs kernels for "
+                    f"{_fmt(p['gpu_ms_per_step'], 2)} ms ({_fmt(100 * (p.get('gpu_busy') or 0), 0)}% busy); "
+                    f"{_fmt(p['kernels_per_step'], 0)} kernels per step, over {p['active_steps']} steps.", ""]
             out += ["| GPU time by category | ms/step |", "|---|---|"]
             out += [f"| {k} | {v:.3f} |" for k, v in p["categories_ms_per_step"].items()]
             out += ["", "| host span | ms/step |", "|---|---|"]

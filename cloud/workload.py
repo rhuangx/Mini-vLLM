@@ -155,10 +155,13 @@ SUITES: dict[str, list[Workload]] = {
     # The pure-torch backend loops over sequences in Python: two points are its baseline.
     "torch": [w1(1), w1(16)],
     "smoke": [Workload("smoke", 4, 64, 16, concurrency=2)],
+    "none": [],  # profiles only
 }
 
-# Traced, not timed: a decode-only window, and a window where prefills and decodes share steps.
+# Traced, not timed, from step 20 on: decode-only windows at 16 and 256 in flight, and a window
+# where short outputs keep requests finishing, so most steps also prefill a newly admitted prompt.
 PROFILES: dict[str, Workload] = {
     "decode": Workload("profile-decode", 16, 128, 64, concurrency=16),
-    "mixed": Workload("profile-mixed", 64, 512, 128, concurrency=16, lognormal=True),
+    "decode-c256": Workload("profile-decode-c256", 256, 128, 96, concurrency=256),
+    "mixed": Workload("profile-mixed", 96, 512, 24, concurrency=16, lognormal=True),
 }

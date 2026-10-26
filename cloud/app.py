@@ -256,10 +256,15 @@ def sweep(suite: str = "quick", engines: str = "mini-cuda,vllm", tag: str = "adh
     for label in engines.split(","):
         if label.startswith("mini-"):
             backend = label.removeprefix("mini-")
-            names = SUITES["torch"] if backend == "torch" and suite != "smoke" else SUITES[suite]
+            torch_only = backend == "torch" and suite not in ("smoke", "none")
+            names = SUITES["torch"] if torch_only else SUITES[suite]
+            # At ~0.5 s a step, the pure path is not traced at 256 in flight.
+            traced = [name for name in PROFILES if backend != "torch" or name != "decode-c256"]
             calls[label] = sweep_mini.spawn(run_dir, label, backend, [asdict(w) for w in names],
-                                            list(PROFILES) if profile else [])
+                                            traced if profile else [])
         elif label in ("vllm", "vllm-eager"):
+            if not SUITES[suite]:
+                continue
             calls[label] = sweep_vllm.spawn(run_dir, label, label == "vllm-eager",
                                             [asdict(w) for w in SUITES[suite]])
         else:
