@@ -1,4 +1,4 @@
-"""scheduler.py: the policy (admission, budget, chunking, piggybacking, preemption), then
+"""engine/scheduler.py: the policy (admission, budget, chunking, piggybacking, preemption), then
 token identity: batched, chunked, preempted and prefix-cached runs of the tiny model through
 the paged pool, each against the request run alone through the dense cache."""
 

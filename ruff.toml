@@ -24,8 +24,8 @@ ignore = ["SIM905"]
 # The error-norm docstrings spell ‖a − b‖ with a real minus sign, not a hyphen.
 allowed-confusables = ["−"]
 
-# The package re-exports each module's __all__ with star imports, as tiny-llm does.
 [lint.per-file-ignores]
-"src/mini_vllm/__init__.py" = ["F403"]
+# The package exports its API after setting an environment variable torch reads at import.
+"src/mini_vllm/__init__.py" = ["E402"]
 # The extension package re-exports every kernel the compiled _ext module defines.
 "src/extensions/mini_vllm_ext/__init__.py" = ["F403", "F405"]

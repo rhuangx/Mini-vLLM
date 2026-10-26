@@ -1,4 +1,4 @@
-"""prefix_cache.py: longest-prefix match, whole blocks only, first copy wins, eviction."""
+"""engine/prefix_cache.py: longest-prefix match, whole blocks only, first copy wins, eviction."""
 
 from mini_vllm.engine.prefix_cache import PrefixCache
 

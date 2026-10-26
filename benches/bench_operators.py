@@ -14,8 +14,12 @@ from matplotlib.figure import Figure
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from utils import CUDA_BUILT, evidence, grouped_bars, per_call_us, save_plot
 
-from mini_vllm import PagedKvPool, RMSNorm, RoPE, paged_attention, swiglu
-from mini_vllm import scaled_dot_product_attention_grouped as sdpa
+from mini_vllm.engine.kv_cache import PagedKvPool
+from mini_vllm.layers.activation import swiglu
+from mini_vllm.layers.attention import paged_attention
+from mini_vllm.layers.attention import scaled_dot_product_attention_grouped as sdpa
+from mini_vllm.layers.layernorm import RMSNorm
+from mini_vllm.layers.rotary_embedding import RoPE
 
 BF16 = torch.bfloat16
 HIDDEN, INTERMEDIATE, Q_HEADS, KV_HEADS, HEAD_DIM = 1024, 3072, 16, 8, 128

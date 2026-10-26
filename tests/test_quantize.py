@@ -1,4 +1,4 @@
-"""quantize.py: the e4m3 error bound, saturation, and the scale."""
+"""layers/quantization.py: the e4m3 error bound, saturation, and the scale."""
 
 import pytest
 import torch

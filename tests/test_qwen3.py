@@ -1,4 +1,4 @@
-"""qwen3.py and models.py: the transplanted model against transformers, and the cache ladder."""
+"""models/qwen3.py and utils/loader.py: the transplanted model against transformers, and the cache ladder."""
 
 import pytest
 import torch

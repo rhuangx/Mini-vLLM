@@ -1,10 +1,9 @@
-"""speculative.py: the acceptance rule keeps the target's distribution, the bookkeeping
+"""engine/speculative.py: the acceptance rule keeps the target's distribution, the bookkeeping
 commits and rolls back exactly, and greedy speculation changes no token."""
 
 import pytest
 import torch
-from test_engine import PROMPTS, assert_nothing_held, engine
-from utils import assert_allclose, requires_cuda
+from utils import PROMPTS, assert_allclose, assert_nothing_held, engine, requires_cuda
 
 from mini_vllm.config import SchedulerConfig
 from mini_vllm.engine.block_manager import BlockManager

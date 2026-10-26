@@ -1,4 +1,4 @@
-"""attention.py against F.scaled_dot_product_attention and its own dense path."""
+"""layers/attention.py against F.scaled_dot_product_attention and its own dense path."""
 
 import random
 

@@ -1,4 +1,4 @@
-"""generate.py: the two loops agree, and greedy decoding matches transformers on the real model."""
+"""reference/generate.py: the two loops agree, and greedy decoding matches transformers on the real model."""
 
 import pytest
 import torch

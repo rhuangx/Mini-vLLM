@@ -1,4 +1,4 @@
-"""positional_encoding.py against transformers.apply_rotary_pos_emb."""
+"""layers/rotary_embedding.py against transformers.apply_rotary_pos_emb."""
 
 import math
 

@@ -1,4 +1,4 @@
-"""sampler.py: greedy, temperature, top-k and top-p truncation, per-row params, the draw."""
+"""layers/sampler.py: greedy, temperature, top-k and top-p truncation, per-row params, the draw."""
 
 import math
 

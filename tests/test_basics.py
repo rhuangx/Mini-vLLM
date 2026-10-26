@@ -1,4 +1,4 @@
-"""basics.py against torch.nn."""
+"""layers/activation.py and layers/linear.py against torch.nn."""
 
 import pytest
 import torch

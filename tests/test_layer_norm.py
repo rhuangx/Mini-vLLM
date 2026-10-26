@@ -1,4 +1,4 @@
-"""layer_norm.py against F.rms_norm."""
+"""layers/layernorm.py against F.rms_norm."""
 
 import pytest
 import torch

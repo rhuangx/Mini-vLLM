@@ -1,4 +1,4 @@
-"""embedding.py against torch.nn.Embedding."""
+"""layers/embedding_head.py against torch.nn.Embedding."""
 
 import pytest
 import torch

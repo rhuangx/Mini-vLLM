@@ -1,5 +1,5 @@
-"""paged_kv_cache.py: refcounts and slot arithmetic, copy-on-write, prefix reuse, fp8 pages,
-and attention through the pool against a dense cache."""
+"""engine/block_manager.py and engine/kv_cache.py: refcounts and slot arithmetic, copy-on-write,
+prefix reuse, fp8 pages, and attention through the pool against a dense cache."""
 
 import pytest
 import torch
@@ -337,11 +337,8 @@ def nan_manager(num_blocks=16, block_size=4, device="cpu") -> BlockManager:
     """A pool filled with NaN, so a read of any slot that was not written poisons the output."""
     manager = make_manager(num_blocks, block_size, num_kv_heads=KV_HEADS, head_dim=DIM,
                            dtype=torch.float32, device=device)
-    kv = manager.kv
-    kv.keys = [torch.full(pool.shape, float("nan"), dtype=pool.dtype, device=pool.device) for pool in kv.keys]
-    kv.values = [
-        torch.full(pool.shape, float("nan"), dtype=pool.dtype, device=pool.device) for pool in kv.values
-    ]
+    for pages in (*manager.kv.keys, *manager.kv.values):
+        pages.fill_(float("nan"))
     return manager
 
 
@@ -435,8 +432,9 @@ def test_the_cuda_write_is_the_pure_write_in_place(fp8):
     ]
     start = torch.randint(0, 255, pools[0].keys[0].shape, device="cuda").to(pools[0].keys[0].dtype)
     for pool in pools:
-        pool.keys = [start + 0 for _ in pool.keys]
-        pool.values = [start + 1 for _ in pool.values]
+        for keys, values in zip(pool.keys, pool.values, strict=True):
+            keys.copy_(start)
+            values.copy_(start + 1)
 
     slots = torch.tensor([5, 17, 3, 30], dtype=torch.int32, device="cuda")
     key = torch.randn(4, 2, 8, device="cuda").bfloat16()

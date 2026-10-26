@@ -1,4 +1,4 @@
-"""batch.py: the ragged layout, built from scheduled requests and their block tables."""
+"""engine/forward_batch.py: the ragged layout, built from scheduled requests and their block tables."""
 
 from mini_vllm.engine.block_manager import BlockManager
 from mini_vllm.engine.forward_batch import PADDING_BLOCK, ForwardBatch

@@ -1,32 +1,35 @@
-"""Mini-vLLM: a paged-attention LLM inference engine for NVIDIA GPUs."""
+"""Mini-vLLM: a paged-attention LLM inference engine for NVIDIA GPUs.
+
+The serving API is here; everything else is imported from its module, e.g.
+mini_vllm.engine.block_manager or mini_vllm.layers.attention.
+"""
 
 import os
 
 # Before torch: its Triton matmul overrides need Python headers and are not the
-# cuBLAS numerics this engine is checked against. Force the flag even if torch
-# was imported earlier, then drop any overrides that already registered.
+# cuBLAS numerics this engine is checked against.
 os.environ["TORCH_DISABLE_NATIVE_JIT"] = "1"
 
-from .config import *
-from .engine.block_manager import *
-from .engine.forward_batch import *
-from .engine.kv_cache import *
-from .engine.llm_engine import *
-from .engine.prefix_cache import *
-from .engine.scheduler import *
-from .engine.sequence import *
-from .engine.speculative import *
-from .layers.activation import *
-from .layers.attention import *
-from .layers.embedding_head import *
-from .layers.layernorm import *
-from .layers.linear import *
-from .layers.quantization import *
-from .layers.rotary_embedding import *
-from .layers.sampler import *
-from .models.qwen3 import *
-from .reference.generate import *
-from .reference.kv_cache import *
-from .sampling_parameters import *
-from .utils.loader import *
-from .utils.tokenizer import *
+from mini_vllm.config import EngineConfig, ModelConfig, SchedulerConfig
+from mini_vllm.engine.llm_engine import LLM, Completion, StreamUpdate
+from mini_vllm.engine.sequence import Request, RequestStatus
+from mini_vllm.sampling_parameters import GREEDY, SamplingParams
+from mini_vllm.utils.loader import DEFAULT_MODEL, from_hf, load
+from mini_vllm.utils.tokenizer import Tokenizer
+
+__all__ = [
+    "DEFAULT_MODEL",
+    "GREEDY",
+    "LLM",
+    "Completion",
+    "EngineConfig",
+    "ModelConfig",
+    "Request",
+    "RequestStatus",
+    "SamplingParams",
+    "SchedulerConfig",
+    "StreamUpdate",
+    "Tokenizer",
+    "from_hf",
+    "load",
+]

@@ -1,42 +1,15 @@
-"""engine.py: the serving loop against the dense single-request loop, the stream against the
+"""engine/llm_engine.py: the serving loop against the dense single-request loop, the stream against the
 batch API, prefix caching, parallel sampling, stop tokens, and cleanup."""
 
 import pytest
 import torch
-from utils import with_and_without_cuda
+from utils import PROMPTS, assert_nothing_held, engine, with_and_without_cuda
 
 from mini_vllm.config import EngineConfig
 from mini_vllm.engine.llm_engine import LLM
 from mini_vllm.reference.generate import generate_with_kv_cache
 from mini_vllm.sampling_parameters import SamplingParams
 from mini_vllm.utils.loader import from_hf
-
-
-class LetterTokenizer:
-    """Enough of a tokenizer for the tiny model's 512-token vocabulary: token i is one letter."""
-
-    def __init__(self, eos_token_ids=()):
-        self.eos_token_ids = set(eos_token_ids)
-
-    def encode(self, text):
-        return [ord(c) % 512 for c in text]
-
-    def decode(self, ids):
-        return "".join(chr(ord("a") + i % 26) for i in ids)
-
-
-def engine(tiny_qwen3, eos_token_ids=(), use_cuda=False, **config) -> LLM:
-    config.setdefault("num_blocks", 64)
-    config.setdefault("block_size", 4)
-    return LLM(from_hf(tiny_qwen3, use_cuda), LetterTokenizer(eos_token_ids), EngineConfig(**config))
-
-
-def assert_nothing_held(llm: LLM) -> None:
-    assert not llm.scheduler.has_work
-    assert llm.manager.pool.num_free == llm.kv.num_blocks, "blocks leaked"
-
-
-PROMPTS = [[1, 2, 3], [5], [7] * 9, [2, 4], [9, 8, 7, 6, 5], [1], list(range(30, 70))]
 
 
 @pytest.mark.parametrize(
