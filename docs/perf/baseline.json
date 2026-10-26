@@ -2842,8 +2842,8 @@
       }
     ]
   },
-  "vllm-eager": {
-    "label": "vllm-eager",
+  "vllm-no-graphs": {
+    "label": "vllm-no-graphs",
     "engine": "vllm",
     "vllm_version": "0.31.0",
     "enforce_eager": true,

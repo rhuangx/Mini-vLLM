@@ -67,7 +67,7 @@ uv sync --group dev --group cloud
 uv run --group cloud modal run -m cloud.app::download    # once: models into a volume
 uv run --group cloud modal run -m cloud.app::probe       # driver, versions, kernels work
 uv run --group cloud modal run -m cloud.app::tests       # the full suite on an H100
-uv run --group cloud modal run -m cloud.app::sweep --suite full --engines mini-cuda,mini-torch,vllm,vllm-eager
+uv run --group cloud modal run -m cloud.app::sweep --suite full --engines mini-cuda,mini-torch,vllm,vllm-no-graphs
 uv run python -m cloud.report results/modal/<tag>/<run>/summary.json --baseline docs/perf/baseline.json
 ```
 
