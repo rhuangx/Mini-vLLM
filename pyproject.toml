@@ -16,16 +16,21 @@ dev = [
     "matplotlib>=3.9",
     "ninja>=1.11",
     # nvcc for src/extensions, CUDA 13 like torch. 13.2, not 13.0: glibc 2.42 declares rsqrt, which 13.0's headers clash with.
-    "nvidia-cuda-cccl==13.2.*",
-    "nvidia-cuda-crt==13.2.*",
-    "nvidia-cuda-nvcc==13.2.*",
-    "nvidia-nvvm==13.2.*",
+    "nvidia-cuda-cccl==13.2.* ; sys_platform == 'linux'",
+    "nvidia-cuda-crt==13.2.* ; sys_platform == 'linux'",
+    "nvidia-cuda-nvcc==13.2.* ; sys_platform == 'linux'",
+    "nvidia-nvvm==13.2.* ; sys_platform == 'linux'",
     "pytest>=8.3",
 ]
+# The Modal harness in cloud/: uv run --group cloud modal run -m cloud.app
+cloud = [
+    "modal>=1.6",
+]
 
-# torch's CUDA 13 wheels live on PyTorch's own index; everything else comes from PyPI.
+# torch's CUDA 13 wheels live on PyTorch's own index; everything else comes from PyPI. That
+# index has no macOS wheels, so a Mac takes PyPI's CPU torch and runs the tests that need no GPU.
 [tool.uv.sources]
-torch = { index = "pytorch-cu130" }
+torch = { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

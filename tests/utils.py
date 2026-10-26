@@ -7,7 +7,7 @@ try:
     import mini_vllm_ext  # noqa: F401
 
     CUDA_BUILT = True
-except ImportError:
+except (ImportError, OSError):  # OSError: the package is there but _ext.so is not built
     CUDA_BUILT = False
 
 DTYPES = [torch.float32, torch.float16, torch.bfloat16]

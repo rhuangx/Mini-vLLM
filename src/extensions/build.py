@@ -145,6 +145,19 @@ def resolve_cuda_home() -> Path:
     return home
 
 
+def cuda_architectures() -> str:
+    """MINI_VLLM_CUDA_ARCHS if set (a CMake list such as "90a;120"), else this machine's GPU,
+    else sm_120. Hopper gets the arch-specific 90a target, so a cubin built for it can use
+    wgmma; nvcc needs no GPU present to compile for any of these."""
+    override = os.environ.get("MINI_VLLM_CUDA_ARCHS")
+    if override:
+        return override
+    if torch.cuda.is_available():
+        major, minor = torch.cuda.get_device_capability()
+        return f"{major}{minor}a" if major == 9 else f"{major}{minor}"
+    return "120"
+
+
 def max_jobs() -> int:
     override = os.environ.get("MAX_JOBS")
     if override:
@@ -170,11 +183,14 @@ def main() -> None:
     env["MAX_JOBS"] = str(max_jobs())
     build = ROOT / "build"
     build.mkdir(exist_ok=True)
+    archs = cuda_architectures()
+    print(f"building for CUDA architectures {archs}")
     subprocess.run(
         [
             "cmake", "-G", "Ninja", "-S", str(ROOT), "-B", str(build),
             f"-DCMAKE_CUDA_COMPILER={home / 'bin' / 'nvcc'}",
             f"-DPython_EXECUTABLE={sys.executable}",
+            f"-DMINI_VLLM_CUDA_ARCHS={archs}",
         ],
         check=True, env=env, cwd=ROOT,
     )

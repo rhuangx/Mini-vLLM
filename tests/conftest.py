@@ -43,8 +43,16 @@ def seeded():
     torch.manual_seed(SEED)
 
 
+def require_gpu() -> None:
+    """Skip the calling test on a machine without a CUDA GPU, such as a Mac: the models and
+    pools the engine tests build live on the device. The full suite runs on Modal."""
+    if not torch.cuda.is_available():
+        pytest.skip("needs a CUDA GPU")
+
+
 def make_tiny_qwen3(**overrides):
     """A randomly initialized fp32 Qwen3ForCausalLM on CUDA: the oracle our model must match."""
+    require_gpu()
     cfg = Qwen3Config(**{**TINY_QWEN3, **overrides})
     cfg._attn_implementation = "eager"
     model = Qwen3ForCausalLM(cfg).to(device="cuda", dtype=torch.float32)
@@ -65,6 +73,7 @@ def tiny_qwen3():
 @pytest.fixture(scope="session")
 def real_qwen3():
     """BF16 Qwen3-0.6B as (transformers model, wrapped tokenizer); skipped unless downloaded."""
+    require_gpu()
     if not isinstance(try_to_load_from_cache(DEFAULT_MODEL, "model.safetensors"), str):
         pytest.skip(f"{DEFAULT_MODEL} is not in the Hugging Face cache")
     model = AutoModelForCausalLM.from_pretrained(DEFAULT_MODEL, dtype=torch.bfloat16).cuda().eval()

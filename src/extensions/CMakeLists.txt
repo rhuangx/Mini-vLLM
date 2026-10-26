@@ -8,7 +8,10 @@ set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CUDA_ARCHITECTURES 120)
+# build.py passes this GPU's arch (or MINI_VLLM_CUDA_ARCHS, e.g. "90a;120"). Every kernel here
+# needs only sm_80 features (mma.sync m16n8k16, ldmatrix), so any list from 80 up builds.
+set(MINI_VLLM_CUDA_ARCHS "120" CACHE STRING "CUDA architectures to build for")
+set(CMAKE_CUDA_ARCHITECTURES ${MINI_VLLM_CUDA_ARCHS})
 
 # Torch's own CMake config rejects this wheel toolkit: nvcc reports 13.2 while
 # cuda.h in the same wheels says 13.0. Take the include and library paths directly.
@@ -38,7 +41,11 @@ target_include_directories(_ext PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/src
   ${TORCH_INCLUDE_DIRS}
   ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-target_link_directories(_ext PRIVATE ${TORCH_LIBRARY_DIRS} /usr/lib/wsl/lib)
+target_link_directories(_ext PRIVATE ${TORCH_LIBRARY_DIRS})
+# WSL keeps the driver's libraries here; elsewhere (Modal, bare Linux) the directory is absent.
+if(EXISTS /usr/lib/wsl/lib)
+  target_link_directories(_ext PRIVATE /usr/lib/wsl/lib)
+endif()
 target_link_libraries(_ext PRIVATE c10 torch torch_cpu torch_cuda c10_cuda)
 target_compile_definitions(_ext PRIVATE _GLIBCXX_USE_CXX11_ABI=1 CCCL_DISABLE_CTK_COMPATIBILITY_CHECK)
 target_compile_options(_ext PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
