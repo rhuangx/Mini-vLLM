@@ -9,7 +9,7 @@ import argparse
 import json
 from pathlib import Path
 
-ORDER = ["mini-cuda", "mini-triton", "mini-torch", "vllm", "vllm-no-graphs"]
+ORDER = ["mini-cuda", "mini-triton", "mini-torch", "vllm", "vllm-eager"]
 BACKENDS = {"cuda": "CUDA", "triton": "Triton", "torch": "PyTorch"}
 
 
@@ -18,10 +18,9 @@ def _labels(results: dict) -> list[str]:
 
 
 def engine_name(label: str, result: dict) -> str:
-    """"Mini-vLLM CUDA", "vLLM (no CUDA graphs)"; versions are in the environment table."""
+    """"Mini-vLLM CUDA", "vLLM eager"; versions are in the environment table."""
     if result.get("engine") == "vllm" or label.startswith("vllm"):
-        no_graphs = result.get("enforce_eager", label != "vllm")  # vLLM's flag for running without graphs
-        return "vLLM (no CUDA graphs)" if no_graphs else "vLLM"
+        return "vLLM eager" if result.get("enforce_eager", label.endswith("eager")) else "vLLM"
     backend = result.get("backend") or label.removeprefix("mini-")
     return f"Mini-vLLM {BACKENDS.get(backend, backend)}"
 

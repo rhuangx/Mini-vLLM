@@ -264,13 +264,13 @@ def sweep(suite: str = "quick", engines: str = "mini-cuda,vllm", tag: str = "adh
             traced = [name for name in PROFILES if backend != "torch" or name != "decode-256-in-flight"]
             calls[label] = sweep_mini.spawn(run_dir, label, backend, [asdict(w) for w in names],
                                             traced if profile else [])
-        elif label in ("vllm", "vllm-no-graphs"):
+        elif label in ("vllm", "vllm-eager"):
             if not SUITES[suite]:
                 continue
-            calls[label] = sweep_vllm.spawn(run_dir, label, label == "vllm-no-graphs",
+            calls[label] = sweep_vllm.spawn(run_dir, label, label == "vllm-eager",
                                             [asdict(w) for w in SUITES[suite]])
         else:
-            raise ValueError(f"unknown engine {label!r}: mini-<backend>, vllm or vllm-no-graphs")
+            raise ValueError(f"unknown engine {label!r}: mini-<backend>, vllm or vllm-eager")
 
     results = {}
     for label, call in calls.items():

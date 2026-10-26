@@ -10,7 +10,7 @@ kernels built for sm_90a. vLLM 0.31.0. Tests: 320/320 pass on the H100.
 | Mini-vLLM CUDA | custom kernels, no CUDA graphs |
 | Mini-vLLM PyTorch | pure-PyTorch oracle; 1 and 16 in flight only |
 | vLLM | CUDA graphs + `torch.compile` |
-| vLLM (no CUDA graphs) | `enforce_eager=True`: no graphs, no `torch.compile`; runs like Mini-vLLM today |
+| vLLM eager | `enforce_eager=True`: no CUDA graphs, no `torch.compile`; runs like Mini-vLLM today |
 
 | workload | in / out tokens | load |
 |---|---|---|
@@ -23,14 +23,14 @@ All engines: 12,288 KV blocks × 16 tokens, ≤256 sequences, 4,096 batched toke
 MBU = (15.1 GB weights + 144 KiB × context tokens) / step time / 3.35 TB/s.
 
 ```bash
-uv run --group cloud modal run -m cloud.app::sweep --suite full --engines mini-cuda,mini-torch,vllm,vllm-no-graphs --tag baseline
+uv run --group cloud modal run -m cloud.app::sweep --suite full --engines mini-cuda,mini-torch,vllm,vllm-eager --tag baseline
 ```
 
 ![Qwen3-8B decode, H100](baseline.png)
 
 ## Findings
 
-| metric | Mini-vLLM CUDA | vLLM | vLLM (no CUDA graphs) | cause → fix |
+| metric | Mini-vLLM CUDA | vLLM | vLLM eager | cause → fix |
 |---|---|---|---|---|
 | decode-heavy, 1 in flight: TPOT (ms) | 11.4 | 6.7 | 17.8 | GPU 44% busy at 16 in flight, 884 launches/step → CUDA graphs (Phase 8) |
 | decode-heavy, 256 in flight: tok/s | 3.8k | 16.3k | 11.3k | paged attention 29 of 38 GPU ms; KV read once per head in each GQA group → Triton kernel (Phase 7), split-K (Phase 9) |
@@ -49,7 +49,7 @@ Same traces, two containers:
 |---|---|
 | vLLM | ≤1.5% |
 | Mini-vLLM CUDA | ≤1% when GPU-bound (128+ in flight, prefill-heavy, shared-prefix); −5% to +15% at 1–64 in flight |
-| vLLM (no CUDA graphs) | −3% to −35% |
+| vLLM eager | −3% to −35% |
 | Mini-vLLM PyTorch | +62% |
 
 Python-bound steps track the host CPU. Compare them with a same-container A/B or the median of 3 runs. Runs now
@@ -66,13 +66,13 @@ From [baseline.json](baseline.json).
 | Mini-vLLM CUDA | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.14.1+cu130 | 13.0 | 10.2 | 12288 |
 | Mini-vLLM PyTorch | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.14.1+cu130 | 13.0 | 8.4 | 12288 |
 | vLLM | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.13.0+cu130, vLLM 0.31.0 | 13.0 | 112.2 | 12288 |
-| vLLM (no CUDA graphs) | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.13.0+cu130, vLLM 0.31.0 | 13.0 | 45.9 | 12288 |
+| vLLM eager | NVIDIA H100 80GB HBM3 | - | 610.57.04 | 2.13.0+cu130, vLLM 0.31.0 | 13.0 | 45.9 | 12288 |
 
 ### decode-heavy (128 in, 512 out)
 
 **tok/s**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 87 | 35 | 148 | 56 |
 | 2 in flight | 174 | - | 295 | 112 |
@@ -86,7 +86,7 @@ From [baseline.json](baseline.json).
 
 **TTFT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 15.0 | 28.6 | 11.7 | 39.1 |
 | 2 in flight | 27.6 | - | 13.7 | 49.7 |
@@ -100,7 +100,7 @@ From [baseline.json](baseline.json).
 
 **TTFT p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 21.9 | 35.1 | 12.4 | 46.8 |
 | 2 in flight | 27.6 | - | 13.7 | 67.7 |
@@ -114,7 +114,7 @@ From [baseline.json](baseline.json).
 
 **TPOT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 11.42 | 28.54 | 6.74 | 17.77 |
 | 2 in flight | 11.47 | - | 6.76 | 17.77 |
@@ -128,7 +128,7 @@ From [baseline.json](baseline.json).
 
 **ITL p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 11.57 | 29.58 | 7.09 | 20.71 |
 | 2 in flight | 11.59 | - | 7.12 | 23.05 |
@@ -142,7 +142,7 @@ From [baseline.json](baseline.json).
 
 **MBU % (from ITL)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 39.7 | 16.0 | 67.3 | 25.1 |
 | 2 in flight | 39.7 | - | 67.3 | 25.4 |
@@ -156,7 +156,7 @@ From [baseline.json](baseline.json).
 
 **MBU % (forward)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 41.2 | 16.2 | - | - |
 | 2 in flight | 41.3 | - | - | - |
@@ -170,7 +170,7 @@ From [baseline.json](baseline.json).
 
 **MBU % (step)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 in flight | 39.8 | 16.0 | - | - |
 | 2 in flight | 39.8 | - | - | - |
@@ -186,31 +186,31 @@ From [baseline.json](baseline.json).
 
 **tok/s**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 96 | - | 259 | 202 |
 
 **TTFT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 275.2 | - | 242.8 | 248.9 |
 
 **TTFT p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 1,150.8 | - | 394.6 | 407.0 |
 
 **TPOT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 67.34 | - | 16.40 | 26.34 |
 
 **ITL p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 275.18 | - | 97.95 | 118.37 |
 
@@ -218,7 +218,7 @@ From [baseline.json](baseline.json).
 
 **tok/s**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 110 | - | 113 | 106 |
 | 2 req/s | 295 | - | 322 | 267 |
@@ -228,7 +228,7 @@ From [baseline.json](baseline.json).
 
 **TTFT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 42.4 | - | 29.6 | 63.4 |
 | 2 req/s | 46.9 | - | 32.7 | 64.3 |
@@ -238,7 +238,7 @@ From [baseline.json](baseline.json).
 
 **TTFT p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 158.3 | - | 43.3 | 78.4 |
 | 2 req/s | 107.9 | - | 60.9 | 79.8 |
@@ -248,7 +248,7 @@ From [baseline.json](baseline.json).
 
 **TPOT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 11.71 | - | 6.80 | 17.56 |
 | 2 req/s | 12.28 | - | 6.98 | 17.47 |
@@ -258,7 +258,7 @@ From [baseline.json](baseline.json).
 
 **ITL p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 1 req/s | 14.01 | - | 7.50 | 19.70 |
 | 2 req/s | 39.81 | - | 10.28 | 19.72 |
@@ -270,31 +270,31 @@ From [baseline.json](baseline.json).
 
 **tok/s**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 488 | - | 1,072 | 442 |
 
 **TTFT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 120.0 | - | 30.2 | 60.6 |
 
 **TTFT p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 490.7 | - | 45.7 | 64.4 |
 
 **TPOT p50 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 13.99 | - | 7.06 | 17.39 |
 
 **ITL p99 (ms)**
 
-| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM (no CUDA graphs) |
+| load | Mini-vLLM CUDA | Mini-vLLM PyTorch | vLLM | vLLM eager |
 |---|---|---|---|---|
 | 8 in flight | 93.44 | - | 7.46 | 20.65 |
 
