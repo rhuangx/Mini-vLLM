@@ -18,7 +18,7 @@ from typing import Any
 ENGINE = {
     "model": "Qwen/Qwen3-8B",
     "block_size": 16,
-    "num_blocks": 12288,          # 196k tokens of KV: W1 at 256 in flight needs about 164k
+    "num_blocks": 12288,          # 196k tokens of KV: decode-heavy at 256 in flight needs 164k
     "max_num_seqs": 256,
     "max_num_batched_tokens": 4096,
     "max_model_len": 4096,

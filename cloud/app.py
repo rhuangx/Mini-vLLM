@@ -119,6 +119,8 @@ def _measure(label, factory_fresh, release, workloads, geometry, peak, out: Path
     entries = []
     for spec in workloads:
         workload = wl.Workload(**spec)
+        # What the report needs to title and label the workload, beside its parameters.
+        spec = {**spec, "name": workload.name, "load": workload.load, "description": workload.describe()}
         adapter = factory_fresh()
         try:
             records, wall = wl.run(adapter, workload)
@@ -259,7 +261,7 @@ def sweep(suite: str = "quick", engines: str = "mini-cuda,vllm", tag: str = "adh
             torch_only = backend == "torch" and suite not in ("smoke", "none")
             names = SUITES["torch"] if torch_only else SUITES[suite]
             # At ~0.5 s a step, the pure path is not traced at 256 in flight.
-            traced = [name for name in PROFILES if backend != "torch" or name != "decode-c256"]
+            traced = [name for name in PROFILES if backend != "torch" or name != "decode-256-in-flight"]
             calls[label] = sweep_mini.spawn(run_dir, label, backend, [asdict(w) for w in names],
                                             traced if profile else [])
         elif label in ("vllm", "vllm-eager"):

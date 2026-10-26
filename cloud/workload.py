@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 import random
 import time
-import zlib
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Protocol
@@ -25,7 +24,7 @@ class Workload:
     one finishes; Poisson submits at `rate` requests per second whatever the engine keeps up with.
     With lognormal, input_len and output_len are medians, not exact lengths."""
 
-    name: str
+    kind: str                 # what the trace exercises, e.g. "decode-heavy"
     num_requests: int
     input_len: int
     output_len: int
@@ -35,9 +34,32 @@ class Workload:
     shared_prefix: int = 0    # tokens every prompt starts with, for the prefix cache
     seed: int = 0
 
+    @property
+    def load(self) -> str:
+        """How hard the trace drives the engine: "16 in flight" or "4 req/s"."""
+        return f"{self.concurrency} in flight" if self.concurrency > 0 else f"{self.rate:g} req/s"
+
+    @property
+    def name(self) -> str:
+        """Unique and safe in a file name: "decode-heavy-16-in-flight", "mixed-4-req-per-s"."""
+        return f"{self.kind}-{self.load.replace('/', '-per-').replace(' ', '-')}"
+
+    def describe(self) -> str:
+        """The trace's shape in words, for a report heading."""
+        if self.lognormal:
+            shape = f"lognormal lengths around {self.input_len} in and {self.output_len} out"
+        elif self.shared_prefix:
+            shape = (f"a {self.shared_prefix}-token preamble shared by every prompt plus {self.input_len} "
+                     f"unique tokens, {self.output_len}-token outputs")
+        else:
+            shape = f"{self.input_len}-token prompts, {self.output_len}-token outputs"
+        return f"{shape}, {'Poisson arrivals' if self.rate > 0 else 'a fixed number in flight'}"
+
     def requests(self) -> list[RequestSpec]:
-        """The trace, identical on every run and for every engine."""
-        rng = random.Random(zlib.crc32(self.name.encode()) + self.seed)
+        """The trace, identical on every run and for every engine. It is seeded by its parameters,
+        not its name, so renaming a workload never changes what it measures."""
+        rng = random.Random(repr((self.num_requests, self.input_len, self.output_len, self.concurrency,
+                                  self.rate, self.lognormal, self.shared_prefix, self.seed)))
         prefix = [rng.randrange(TOKEN_LOW, TOKEN_HIGH) for _ in range(self.shared_prefix)]
         specs, arrival = [], 0.0
         for _ in range(self.num_requests):
@@ -129,31 +151,33 @@ def run(
     return records, wall
 
 
-def w1(concurrency: int) -> Workload:
-    """Decode-heavy: short prompts, long outputs."""
-    return Workload(f"W1-c{concurrency}", max(4, 2 * concurrency), 128, 512, concurrency=concurrency)
+def decode_heavy(concurrency: int) -> Workload:
+    """Short prompts, long outputs: nearly every step is pure decode."""
+    return Workload("decode-heavy", max(4, 2 * concurrency), 128, 512, concurrency=concurrency)
 
 
-W2 = Workload("W2", 32, 2048, 16, concurrency=8)  # prefill-heavy
+# Long prompts, short outputs: prefill dominates, and decodes share steps with it.
+PREFILL_HEAVY = Workload("prefill-heavy", 32, 2048, 16, concurrency=8)
 
 
-def w3(rate: float) -> Workload:
-    """Mixed: lognormal lengths around 512 in and 128 out, Poisson arrivals."""
-    return Workload(f"W3-r{rate:g}", min(128, max(32, int(rate * 20))), 512, 128, rate=rate, lognormal=True)
+def mixed(rate: float) -> Workload:
+    """Lognormal lengths and Poisson arrivals, the closest of these to live traffic."""
+    return Workload("mixed", min(128, max(32, int(rate * 20))), 512, 128, rate=rate, lognormal=True)
 
 
-W4 = Workload("W4", 32, 64, 64, concurrency=8, shared_prefix=1024)  # 1024 shared + 64 unique
+# Every prompt opens with the same 1024 tokens: what the prefix cache can save.
+SHARED_PREFIX = Workload("shared-prefix", 32, 64, 64, concurrency=8, shared_prefix=1024)
 
 SUITES: dict[str, list[Workload]] = {
-    "quick": [*(w1(c) for c in (1, 16, 64, 256)), W2],
+    "quick": [*(decode_heavy(c) for c in (1, 16, 64, 256)), PREFILL_HEAVY],
     "full": [
-        *(w1(c) for c in (1, 2, 4, 8, 16, 32, 64, 128, 256)),
-        W2,
-        *(w3(r) for r in (1, 2, 4, 8, 16)),
-        W4,
+        *(decode_heavy(c) for c in (1, 2, 4, 8, 16, 32, 64, 128, 256)),
+        PREFILL_HEAVY,
+        *(mixed(r) for r in (1, 2, 4, 8, 16)),
+        SHARED_PREFIX,
     ],
     # The pure-torch backend loops over sequences in Python: two points are its baseline.
-    "torch": [w1(1), w1(16)],
+    "torch": [decode_heavy(1), decode_heavy(16)],
     "smoke": [Workload("smoke", 4, 64, 16, concurrency=2)],
     "none": [],  # profiles only
 }
@@ -161,7 +185,7 @@ SUITES: dict[str, list[Workload]] = {
 # Traced, not timed, from step 20 on: decode-only windows at 16 and 256 in flight, and a window
 # where short outputs keep requests finishing, so most steps also prefill a newly admitted prompt.
 PROFILES: dict[str, Workload] = {
-    "decode": Workload("profile-decode", 16, 128, 64, concurrency=16),
-    "decode-c256": Workload("profile-decode-c256", 256, 128, 96, concurrency=256),
+    "decode-16-in-flight": Workload("profile-decode", 16, 128, 64, concurrency=16),
+    "decode-256-in-flight": Workload("profile-decode", 256, 128, 96, concurrency=256),
     "mixed": Workload("profile-mixed", 96, 512, 24, concurrency=16, lognormal=True),
 }
