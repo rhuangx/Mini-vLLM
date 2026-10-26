@@ -51,3 +51,24 @@ uv run python batch-main.py --concurrency 32 --cuda --prefix-caching --fp8-kv-ca
 uv run pytest
 uv run python benches/bench_operators.py
 ```
+
+The extension builds for the local GPU's architecture; set `MINI_VLLM_CUDA_ARCHS` (a CMake list such
+as `90a;120`) to build for others. On a machine without a CUDA GPU, such as a Mac, `uv sync` installs
+CPU torch and `pytest` runs the tests that need no GPU.
+
+## H100s on Modal
+
+`cloud/` runs the test suite, the benches, and serving sweeps of Qwen3-8B on Modal H100s, with vLLM
+on the same workloads and the same KV capacity as the baseline. Setting `MINI_VLLM_PROFILE=1` makes
+the engine mark its phases for profilers and time each forward.
+
+```bash
+uv sync --group dev --group cloud
+uv run --group cloud modal run -m cloud.app::download    # once: models into a volume
+uv run --group cloud modal run -m cloud.app::probe       # driver, versions, kernels work
+uv run --group cloud modal run -m cloud.app::tests       # the full suite on an H100
+uv run --group cloud modal run -m cloud.app::sweep --suite full --engines mini-cuda,mini-torch,vllm,vllm-eager
+uv run python -m cloud.report results/modal/<tag>/<run>/summary.json --baseline docs/perf/baseline.json
+```
+
+The baseline these are measured against is in [docs/perf/baseline.md](docs/perf/baseline.md).
