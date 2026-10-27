@@ -1,15 +1,26 @@
-"""Grouped-query attention, dense and over a paged KV cache."""
+"""Grouped-query attention, dense and over a paged KV cache, and the fp8 pages it reads."""
 
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import torch
 
 from mini_vllm.layers.activation import softmax
-from mini_vllm.layers.quantization import dequantize_fp8
 
-__all__ = ["causal_mask", "gather_pages", "paged_attention", "scaled_dot_product_attention_grouped"]
+if TYPE_CHECKING:
+    from mini_vllm.engine.model_runner import HostLists
+
+__all__ = [
+    "FP8_MAX",
+    "causal_mask",
+    "dequantize_fp8",
+    "gather_pages",
+    "paged_attention",
+    "quantize_fp8",
+    "scaled_dot_product_attention_grouped",
+]
 
 
 def causal_mask(
@@ -104,7 +115,7 @@ def paged_attention(
     scale: float | None = None,
     k_scale: float = 1.0,
     v_scale: float = 1.0,
-    host: tuple[list[list[int]], list[int], list[int]] | None = None,
+    host: HostLists | None = None,
 ) -> torch.Tensor:
     """Causal grouped attention over a paged cache, gathering each sequence's pages first.
 
@@ -112,13 +123,16 @@ def paged_attention(
     int32 metadata is block_tables (N x max_blocks, -1 padded), cu_seqlens_q (N + 1) and
     context_lens (N).
 
-    host, when the caller already has them, is (block tables, query starts, context lengths)
-    as Python lists, read instead of .tolist(), which would sync the device once per list.
+    host, when the caller already has them, holds the batch's metadata as Python lists, read
+    instead of .tolist(), which would sync the device once per list.
     Direct calls omit it and fall back.
     """
     if scale is None:
         scale = query.shape[-1] ** -0.5
-    starts, lengths = (cu_seqlens_q.tolist(), context_lens.tolist()) if host is None else host[1:]
+    if host is None:
+        starts, lengths = cu_seqlens_q.tolist(), context_lens.tolist()
+    else:
+        starts, lengths = host.offsets, host.context_lens
 
     outputs = []
     for index, context_len in enumerate(lengths):
@@ -136,3 +150,18 @@ def paged_attention(
         outputs.append(attended.transpose(0, 1))
 
     return torch.cat(outputs, dim=0)
+
+
+# The largest finite e4m3 value. Torch's cast turns anything past it into NaN, so quantize
+# saturates first, which is what mx.to_fp8 used to do.
+FP8_MAX = 448.0
+
+
+def quantize_fp8(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+    """x / scale as e4m3 bits in uint8: half the bytes of bf16, 3 mantissa bits."""
+    return (x.float() / scale).clamp(-FP8_MAX, FP8_MAX).to(torch.float8_e4m3fn).view(torch.uint8)
+
+
+def dequantize_fp8(x: torch.Tensor, scale: float = 1.0, dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
+    """The inverse of quantize_fp8: decode the uint8 bits, multiply the scale back in."""
+    return (x.view(torch.float8_e4m3fn).float() * scale).to(dtype)

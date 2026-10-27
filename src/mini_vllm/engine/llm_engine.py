@@ -8,35 +8,30 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+import torch.multiprocessing as mp
+from torch import nn
 
 from mini_vllm.config import EngineConfig
 from mini_vllm.engine.block_manager import BlockManager
-from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
-from mini_vllm.engine.model_runner import run_batch
+from mini_vllm.engine.model_runner import (
+    ForwardBatch,
+    ModelRunner,
+    decode_first,
+    free_port,
+    init_distributed,
+    tp_worker,
+)
 from mini_vllm.engine.scheduler import Scheduler, SchedulerOutput
 from mini_vllm.engine.sequence import Request, RequestStatus
-from mini_vllm.engine.speculative import DraftProposer, SpeculativeDecoder, self_draft
+from mini_vllm.engine.speculative import DraftProposer, SpeculativeDecoder
 from mini_vllm.layers.sampler import sample
-from mini_vllm.models.qwen3 import Qwen3Model
 from mini_vllm.sampling_parameters import GREEDY, SamplingParams
 from mini_vllm.utils import profiling
 from mini_vllm.utils.loader import DEFAULT_MODEL, load
 from mini_vllm.utils.profiling import StepStats
 
-__all__ = ["LLM", "Completion", "StreamUpdate", "blocks_that_fit"]
-
-
-def blocks_that_fit(model: Qwen3Model, config: EngineConfig) -> int:
-    """How many pages fit in kv_fraction of the memory left once the weights are in.
-
-    "Left" is the free device memory torch reports.
-    """
-    c = model.config
-    element = 1 if config.fp8_kv_cache else model.embedding.weight.dtype.itemsize
-    per_block = 2 * c.num_hidden_layers * config.block_size * c.num_key_value_heads * c.head_dim * element
-    left = torch.cuda.mem_get_info()[0]
-    return int(left * config.kv_fraction) // per_block
+__all__ = ["LLM", "Completion", "StreamUpdate"]
 
 
 def _as_prompt_list(prompts: str | list[int] | Sequence[str | list[int]]) -> list[str | list[int]]:
@@ -72,23 +67,14 @@ class LLM:
         completions = llm.generate(["The capital of France is"], max_tokens=32)
     """
 
-    def __init__(self, model: Qwen3Model, tokenizer: Any, config: EngineConfig | None = None) -> None:
+    def __init__(self, model: nn.Module, tokenizer: Any, config: EngineConfig | None = None) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.config = config = config or EngineConfig()
         self.stop_token_ids = frozenset(tokenizer.eos_token_ids)
 
-        c = model.config
-        self.kv = PagedKvPool(
-            c.num_hidden_layers,
-            config.num_blocks or blocks_that_fit(model, config),
-            config.block_size,
-            c.num_key_value_heads,
-            c.head_dim,
-            dtype=model.embedding.weight.dtype,
-            device=model.embedding.weight.device,
-            fp8=config.fp8_kv_cache,
-        )
+        self.runner = ModelRunner(model, config)
+        self.kv = self.runner.kv
         self.manager = BlockManager(self.kv, config.enable_prefix_caching)
         self.scheduler = Scheduler(config.scheduler_config(), self.manager)
         self.spec = self._build_speculation() if config.num_speculative_tokens else None
@@ -101,30 +87,47 @@ class LLM:
         """The draft and the pool of its own it caches in: as many layers as the draft has."""
         config = self.config
         if config.draft_model is not None:
-            draft = load(config.draft_model, self.model.layers[0].attention.backend)[0]
+            draft = load(config.draft_model, config.backend)[0]
         else:
-            draft = self_draft(self.model, config.num_draft_layers or self.model.config.num_hidden_layers)
+            draft = self.model.share_prefix(config.num_draft_layers or self.model.config.num_hidden_layers)
         k = config.num_speculative_tokens
         # It caches every target token plus k proposals, for every request in flight.
         per_request = -(-k // config.block_size) + 1
-        dc = draft.config
+        dc, weight = draft.config, next(draft.parameters())
         kv = PagedKvPool(
             dc.num_hidden_layers,
             config.draft_blocks or self.kv.num_blocks + config.max_sequences * per_request,
             config.block_size,
             dc.num_key_value_heads,
             dc.head_dim,
-            dtype=draft.embedding.weight.dtype,
-            device=draft.embedding.weight.device,
+            dtype=weight.dtype,
+            device=weight.device,
             fp8=config.fp8_kv_cache,
         )
         return SpeculativeDecoder(DraftProposer(draft, kv, k), self.manager)
 
     @classmethod
-    def from_pretrained(cls, model: str = DEFAULT_MODEL, backend: str = "torch", **config: Any) -> LLM:
-        """backend "cuda" runs every operator with a kernel on src/extensions/, which must be built."""
-        qwen3, tokenizer = load(model, backend)
-        return cls(qwen3, tokenizer, EngineConfig(**config))
+    def from_pretrained(cls, model: str = DEFAULT_MODEL, **config: Any) -> LLM:
+        """Load a checkpoint and serve it. backend "cuda" needs src/extensions built; with
+        tensor_parallel_size N, ranks 1..N-1 run in worker processes, one GPU each."""
+        engine_config = EngineConfig(**config)
+        tp = engine_config.tensor_parallel_size
+        if tp == 1:
+            return cls(*load(model, engine_config.backend), engine_config)
+        assert not engine_config.num_speculative_tokens, "speculative decoding runs on one GPU"
+        port, spawn = free_port(), mp.get_context("spawn")
+        workers = [spawn.Process(target=tp_worker, args=(model, engine_config, rank, port), daemon=True)
+                   for rank in range(1, tp)]
+        for worker in workers:
+            worker.start()
+        init_distributed(0, tp, port)
+        llm = cls(*load(model, engine_config.backend, device="cuda:0"), engine_config)
+        llm.runner.workers = workers
+        return llm
+
+    def close(self) -> None:
+        """Release the tensor-parallel workers, if any."""
+        self.runner.close()
 
     def add_request(
         self,
@@ -156,6 +159,7 @@ class LLM:
                 self.spec.propose(decoding)
         with profiling.span("schedule"):
             output = self.scheduler.schedule()
+            decode_first(output.scheduled)
         scheduled = {request.request_id for request in output.requests}
         for request in decoding:
             if request.request_id not in scheduled:
@@ -177,7 +181,7 @@ class LLM:
         timer = profiling.CudaTimer(device)
         with profiling.span("forward"):
             timer.start()
-            logits = run_batch(self.model, self.kv, batch, rows=row_index)
+            logits = self.runner.run(batch, row_index)
             timer.stop()
         with profiling.span("sample"):
             last = logits[torch.tensor([span.stop - 1 for span in spans], device=device)]

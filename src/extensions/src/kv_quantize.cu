@@ -15,9 +15,12 @@ __global__ void kv_quantize_scatter_kernel(const int* __restrict__ slot_mapping,
   if (index >= count) {
     return;
   }
-  const int token = index / row;
+  const int slot = slot_mapping[index / row];
+  if (slot < 0) {  // a padded row of a captured batch: nothing to write
+    return;
+  }
   const float scaled = static_cast<float>(values[index]) / scale;
-  pool[static_cast<size_t>(slot_mapping[token]) * row + index % row] =
+  pool[static_cast<size_t>(slot) * row + index % row] =
       __nv_cvt_float_to_fp8(scaled, __NV_SATFINITE, __NV_E4M3);
 }
 

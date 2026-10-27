@@ -21,8 +21,11 @@ __global__ void paged_cache_update_kernel(const int* __restrict__ slot_mapping, 
   if (index >= count) {
     return;
   }
-  const int token = index / row;
-  pool[static_cast<size_t>(slot_mapping[token]) * row + index % row] = values[index];
+  const int slot = slot_mapping[index / row];
+  if (slot < 0) {  // a padded row of a captured batch: nothing to write
+    return;
+  }
+  pool[static_cast<size_t>(slot) * row + index % row] = values[index];
 }
 
 template <typename T>

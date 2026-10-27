@@ -175,8 +175,6 @@ SUITES: dict[str, list[Workload]] = {
     ],
     # The pure-torch backend loops over sequences in Python: two points are its baseline.
     "torch": [decode_heavy(1), decode_heavy(16)],
-    # Same-container A/B (cloud.app's ab): the host-bound points, and one GPU-bound control.
-    "ab": [decode_heavy(1), decode_heavy(16), PREFILL_HEAVY],
     "smoke": [Workload("smoke", 4, 64, 16, concurrency=2)],
     "none": [],  # profiles only
 }

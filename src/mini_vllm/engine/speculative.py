@@ -3,17 +3,16 @@ rejection sampling keeps its distribution exact, and the rejected tail is rolled
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import torch
+from torch import nn
 
 from mini_vllm.engine.block_manager import BlockManager
-from mini_vllm.engine.forward_batch import ForwardBatch
 from mini_vllm.engine.kv_cache import PagedKvPool
-from mini_vllm.engine.model_runner import run_batch
+from mini_vllm.engine.model_runner import ForwardBatch, run_batch
 from mini_vllm.engine.sequence import Request
 from mini_vllm.layers.sampler import sampling_probabilities
-from mini_vllm.models.qwen3 import Qwen3Model
 from mini_vllm.utils import profiling
 
 __all__ = [
@@ -22,7 +21,6 @@ __all__ = [
     "SpeculativeDecoder",
     "accept_proposals",
     "residual_distribution",
-    "self_draft",
 ]
 
 
@@ -88,18 +86,6 @@ def accept_proposals(
     return [*accepted, _draw(target_probs[count])], len(accepted)
 
 
-def self_draft(model: Qwen3Model, num_layers: int) -> Qwen3Model:
-    """The target's first num_layers layers and its head, sharing every weight: a draft
-    that needs no second checkpoint."""
-    return Qwen3Model(
-        replace(model.config, num_hidden_layers=num_layers),
-        model.embedding,
-        model.layers[:num_layers],
-        model.norm,
-        model.lm_head,
-    )
-
-
 class DraftProposer:
     """A draft model, its own KV pool, and one shadow request per target request.
 
@@ -107,7 +93,7 @@ class DraftProposer:
     simply not speculated this step.
     """
 
-    def __init__(self, model: Qwen3Model, kv: PagedKvPool, num_speculative_tokens: int) -> None:
+    def __init__(self, model: nn.Module, kv: PagedKvPool, num_speculative_tokens: int) -> None:
         self.model = model
         self.kv = kv
         self.manager = BlockManager(kv)

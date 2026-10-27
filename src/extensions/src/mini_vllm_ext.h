@@ -12,7 +12,7 @@ void check_int32(const at::Tensor& tensor, const char* name);
 void check_dim(const at::Tensor& tensor, int64_t limit, const char* name);
 
 at::Tensor rms_norm(const at::Tensor& x, const at::Tensor& weight, double eps);
-at::Tensor swiglu(const at::Tensor& gate, const at::Tensor& up);
+at::Tensor silu_and_mul(const at::Tensor& x);
 at::Tensor rope(const at::Tensor& x, const at::Tensor& positions, const at::Tensor& cos, const at::Tensor& sin);
 void paged_cache_update(at::Tensor pool, const at::Tensor& slot_mapping, const at::Tensor& values);
 void kv_quantize_scatter(at::Tensor pool, const at::Tensor& slot_mapping, const at::Tensor& values, double scale);
@@ -23,7 +23,7 @@ at::Tensor paged_attention(const at::Tensor& q, const at::Tensor& key_pages, con
                            const at::Tensor& context_lens, double scale, double k_scale, double v_scale);
 
 void launch_rms_norm(const at::Tensor& input, const at::Tensor& weight, at::Tensor& out, float eps);
-void launch_swiglu(const at::Tensor& gate, const at::Tensor& up, at::Tensor& out);
+void launch_silu_and_mul(const at::Tensor& x, at::Tensor& out);
 void launch_rope(const at::Tensor& x, const at::Tensor& positions, const at::Tensor& cos, const at::Tensor& sin,
                  at::Tensor& out);
 void launch_paged_cache_update(at::Tensor& pool, const at::Tensor& slot_mapping, const at::Tensor& values);

@@ -30,7 +30,7 @@ list(GET TORCH_PATHS 1 TORCH_LIBRARIES_JOINED)
 string(REPLACE "|" ";" TORCH_INCLUDE_DIRS "${TORCH_INCLUDES_JOINED}")
 string(REPLACE "|" ";" TORCH_LIBRARY_DIRS "${TORCH_LIBRARIES_JOINED}")
 
-set(OPS rms_norm swiglu rope decode_attention flash_prefill paged_attention kv_quantize)
+set(OPS rms_norm silu_and_mul rope decode_attention flash_prefill paged_attention kv_quantize)
 
 add_library(_ext SHARED ${CMAKE_CURRENT_LIST_DIR}/bindings.cpp ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp)
 foreach(op ${OPS})

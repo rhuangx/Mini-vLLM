@@ -9,7 +9,7 @@ import argparse
 import json
 from pathlib import Path
 
-ORDER = ["mini-cuda", "mini-triton", "mini-torch", "vllm", "vllm-eager"]
+ORDER = ["mini-cuda", "mini-triton", "mini-torch", "mini-cuda-tp2", "vllm", "vllm-eager"]
 BACKENDS = {"cuda": "CUDA", "triton": "Triton", "torch": "PyTorch"}
 
 
@@ -22,7 +22,8 @@ def engine_name(label: str, result: dict) -> str:
     if result.get("engine") == "vllm" or label.startswith("vllm"):
         return "vLLM eager" if result.get("enforce_eager", label.endswith("eager")) else "vLLM"
     backend = result.get("backend") or label.removeprefix("mini-")
-    return f"Mini-vLLM {BACKENDS.get(backend, backend)}"
+    parallel = result.get("tensor_parallel_size", 1)
+    return f"Mini-vLLM {BACKENDS.get(backend, backend)}" + (f" TP{parallel}" if parallel > 1 else "")
 
 
 def _workload(result: dict, name: str) -> dict | None:

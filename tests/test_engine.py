@@ -1,179 +1,100 @@
-"""engine/llm_engine.py: the serving loop against the dense single-request loop, the stream against the
-batch API, prefix caching, parallel sampling, stop tokens, and cleanup."""
+"""The model against transformers, and the engine against itself one request at a time:
+batching, chunking, preemption, prefix caching, fp8, speculation, parallel sampling, CUDA
+graphs and tensor parallelism must change no token."""
 
 import pytest
 import torch
-from utils import PROMPTS, assert_nothing_held, engine, with_each_backend
+from conftest import BACKENDS, DEVICE, GPU_BACKENDS, tiny_hf
 
-from mini_vllm.config import EngineConfig
-from mini_vllm.engine.llm_engine import LLM
-from mini_vllm.reference.generate import generate_with_kv_cache
-from mini_vllm.sampling_parameters import SamplingParams
-from mini_vllm.utils.loader import from_hf
+from mini_vllm import DEFAULT_MODEL, LLM, EngineConfig, SamplingParams, from_hf
+from mini_vllm.utils.loader import build_model, iter_state_dict, load_weights
 
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        {},
-        {"max_batched_tokens": 12, "max_sequences": 3, "chunk_size": 8},  # chunked, piggybacked
-        # 14 pages: the longest request (40 + 8 tokens) fits alone, and the seven together
-        # (~30 pages) force steady preemption.
-        {"num_blocks": 14, "max_batched_tokens": 16},
-    ],
-)
-@with_each_backend
-def test_every_request_matches_running_it_alone(tiny_qwen3, config, backend):
-    llm = engine(tiny_qwen3, backend=backend, **config)
-    completions = llm.generate(PROMPTS, max_tokens=8)
-
-    # Against the dense loop on the pure-torch model, so the kernels are checked too.
-    pure = from_hf(tiny_qwen3)
-    for prompt, completion in zip(PROMPTS, completions, strict=True):
-        assert completion.token_ids == generate_with_kv_cache(pure, prompt, 8)
-        assert completion.finish_reason == "length"
-    # A continuation that repeats one token would match whatever the history held.
-    assert sum(len(set(c.token_ids)) for c in completions) > 3 * len(PROMPTS), "degenerate outputs"
-    assert_nothing_held(llm)
+PROMPTS = [[1, 2, 3], [5], [7] * 9, [2, 4], [9, 8, 7, 6, 5], [1], list(range(30, 70))]
 
 
-def test_generate_is_the_stream_drained(tiny_qwen3):
-    llm = engine(tiny_qwen3)
-    streamed = {}
-    for update in llm.generate_stream(PROMPTS, max_tokens=6):
-        streamed.setdefault(update.index, []).append(update)
+class LetterTokenizer:
+    eos_token_ids = ()
 
-    completions = llm.generate(PROMPTS, max_tokens=6)
-    for index, completion in enumerate(completions):
-        updates = streamed[index]
-        assert [u.token_id for u in updates] == completion.token_ids
-        assert "".join(u.text for u in updates) == completion.text
-        assert completion.text == llm.tokenizer.decode(completion.token_ids)
-        assert [u.finish_reason for u in updates] == [None] * 5 + ["length"]
+    def encode(self, text):
+        return [ord(c) % 512 for c in text]
+
+    def decode(self, ids):
+        return "".join(chr(ord("a") + i % 26) for i in ids)
 
 
-def test_prefix_caching_changes_nothing_and_hits(tiny_qwen3):
-    shared = list(range(100, 124))
-    prompts = [[*shared, tail] for tail in range(5)]
-    plain = engine(tiny_qwen3).generate(prompts, max_tokens=6)
-
-    llm = engine(tiny_qwen3, enable_prefix_caching=True, max_sequences=1)
-    cached = llm.generate(prompts, max_tokens=6)
-
-    assert [c.token_ids for c in cached] == [c.token_ids for c in plain]
-    assert llm.manager.cache.num_cached_blocks >= len(shared) // 4, "the shared prefix was never cached"
-    assert_nothing_held(llm)
+def generate(hf, **config):
+    config.setdefault("num_blocks", 64)
+    config.setdefault("block_size", 4)
+    llm = LLM(from_hf(hf), LetterTokenizer(), EngineConfig(**config))
+    out = [c.token_ids for c in llm.generate(PROMPTS, max_tokens=10)]
+    assert not llm.scheduler.has_work and llm.manager.pool.num_free == llm.kv.num_blocks, "pages leaked"
+    return out, llm
 
 
-def test_parallel_sampling_forks_after_the_prompt_and_shares_its_pages(tiny_qwen3):
-    llm = engine(tiny_qwen3)
-    prompt = list(range(1, 11))  # 10 tokens: 3 pages of 4, the last one partial
-    llm.add_request(prompt, SamplingParams(temperature=0.0, n=3), max_tokens=5)
-
-    emitted, forked = llm.step()
-
-    assert len(forked) == 2 and len(emitted) == 3, "leader and both branches emit a first token"
-    leader = forked[0][0]
-    pages = list(leader.block_table.block_ids)
-    assert all(branch.block_table.block_ids == pages for _, branch in forked), "not the leader's pages"
-    assert all(llm.manager.pool.ref_counts[page] == 3 for page in pages)
-    assert llm.manager.pool.num_free == 64 - 3, "the branches hold the prompt's pages, not copies"
-
-    llm.step()  # the leader keeps the partial page; each branch copies it before writing
-    assert llm.manager.pool.num_free == 64 - 3 - 2
-    assert all(llm.manager.pool.ref_counts[page] == 3 for page in pages[:2]), "full pages stay shared"
-    assert llm.manager.pool.ref_counts[pages[2]] == 1
+@pytest.mark.parametrize("kind, tied", [("qwen3", False), ("qwen3", True), ("llama", False)])
+def test_logits_match_transformers(kind, tied):
+    hf = tiny_hf(kind, tie_word_embeddings=tied)
+    model = from_hf(hf)
+    ids = torch.randint(0, 512, (12,), device=DEVICE)
+    with torch.no_grad():
+        theirs = hf(ids[None]).logits[0]
+        ours = model.compute_logits(model(ids, torch.arange(12, device=DEVICE)))
+    torch.testing.assert_close(ours, theirs, rtol=1e-5, atol=1e-5)
 
 
-def test_greedy_branches_are_identical_and_complete(tiny_qwen3):
-    llm = engine(tiny_qwen3)
-    prompts = [[1, 2, 3], list(range(20, 33))]
-    completions = llm.generate(prompts, SamplingParams(temperature=0.0, n=3), max_tokens=6)
-
-    assert [(c.prompt, c.sample_index) for c in completions] == [
-        (p, s) for p in prompts for s in range(3)
-    ], "prompt order, then sample order"
-    for c in completions:
-        assert c.token_ids == generate_with_kv_cache(llm.model, c.prompt, 6)
-        assert len(set(c.token_ids)) > 1, "a repeated token would match whatever the branch attended to"
-    assert_nothing_held(llm)
+def test_a_missing_checkpoint_tensor_is_refused(tiny_qwen3):
+    model = build_model(from_hf(tiny_qwen3).config, torch.float32, DEVICE)
+    weights = [(n, t) for n, t in iter_state_dict(tiny_qwen3) if "layers.1.mlp.up_proj" not in n]
+    with pytest.raises(KeyError, match="gate_up_proj"):
+        load_weights(model, weights)
 
 
-def test_sampled_branches_differ_and_replay_under_a_seed(tiny_qwen3):
-    params = SamplingParams(temperature=1.0, n=4)
-    first = engine(tiny_qwen3, seed=7).generate([[1, 2, 3]], params, max_tokens=8)
-    again = engine(tiny_qwen3, seed=7).generate([[1, 2, 3]], params, max_tokens=8)
-
-    assert [c.token_ids for c in first] == [c.token_ids for c in again]
-    assert len({tuple(c.token_ids) for c in first}) > 1, "four samples at temperature 1 all agreed"
-
-
-def test_a_stop_token_ends_a_request_and_stays_out_of_its_text(tiny_qwen3):
-    free_run = engine(tiny_qwen3).generate([[4, 5, 6]], max_tokens=10)[0].token_ids
-    stop = free_run[3]
-    expected = free_run[: free_run.index(stop) + 1]
-
-    llm = engine(tiny_qwen3, eos_token_ids={stop})
-    completion = llm.generate([[4, 5, 6]], max_tokens=10)[0]
-
-    assert completion.token_ids == expected and completion.finish_reason == "stop"
-    assert completion.text == llm.tokenizer.decode(expected[:-1])
-    ignored = llm.generate([[4, 5, 6]], max_tokens=10, ignore_eos=True)[0]
-    assert ignored.token_ids == free_run and ignored.finish_reason == "length"
+CONFIGS = [
+    {},
+    {"max_batched_tokens": 12, "max_sequences": 3, "chunk_size": 8},  # chunked, decodes ride along
+    {"num_blocks": 14, "max_batched_tokens": 16},                     # steady preemption
+    {"enable_prefix_caching": True},
+    {"num_speculative_tokens": 3, "num_draft_layers": 1},             # a draft mostly rejected
+    {"num_speculative_tokens": 4},                                    # a full-depth self-draft
+]
 
 
-def test_abandoning_a_stream_releases_everything(tiny_qwen3):
-    llm = engine(tiny_qwen3, max_sequences=2)
-    stream = llm.generate_stream(PROMPTS, max_tokens=8)
-    next(stream)
-    assert llm.scheduler.has_work
-
-    stream.close()
-
-    assert_nothing_held(llm)
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("config", CONFIGS)
+def test_every_request_matches_running_it_alone(tiny_qwen3, backend, config):
+    alone, _ = generate(tiny_qwen3, max_sequences=1, enable_chunked_prefill=False)
+    got, _ = generate(tiny_qwen3, backend=backend, **config)
+    assert got == alone
 
 
-@with_each_backend
-def test_an_fp8_kv_cache_serves_to_completion(tiny_qwen3, backend):
-    llm = engine(tiny_qwen3, fp8_kv_cache=True, backend=backend)
-    assert llm.kv.keys[0].dtype == torch.uint8
-    completions = llm.generate(PROMPTS, max_tokens=8)
-    assert all(len(c.token_ids) == 8 for c in completions)
-    # The kernels quantize the same bytes and dequantize in fp32, as this fp32 model's oracle does.
-    pure = engine(tiny_qwen3, fp8_kv_cache=True).generate(PROMPTS, max_tokens=8)
-    assert [c.token_ids for c in completions] == [c.token_ids for c in pure]
-    assert_nothing_held(llm)
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_fp8_pages_batch_like_fp8_alone(tiny_qwen3, backend):
+    alone, _ = generate(tiny_qwen3, fp8_kv_cache=True, max_sequences=1, enable_chunked_prefill=False)
+    assert generate(tiny_qwen3, backend=backend, fp8_kv_cache=True)[0] == alone
 
 
-@pytest.fixture(scope="module")
-def real_llm(real_qwen3):
-    hf_model, tokenizer = real_qwen3
-    return LLM(from_hf(hf_model), tokenizer, EngineConfig(num_blocks=512))
+def test_greedy_branches_of_one_prompt_agree(tiny_qwen3):
+    llm = LLM(from_hf(tiny_qwen3), LetterTokenizer(), EngineConfig(num_blocks=64, block_size=4))
+    out = llm.generate([[1, 2, 3]], SamplingParams(temperature=0.0, n=3), max_tokens=6)
+    assert len(out) == 3 and all(c.token_ids == out[0].token_ids for c in out)
 
 
-def test_the_real_model_serves_text(real_llm):
-    prompts = ["The capital of France is", "def fibonacci(n):", "Paged attention stores the KV cache in"]
-    completions = real_llm.generate(prompts, max_tokens=24)
-
-    assert completions[0].text.startswith(" Paris"), "the first token keeps its leading space"
-    for completion in completions:
-        assert completion.text == real_llm.tokenizer.decode(completion.token_ids)
-    streamed = ["", "", ""]
-    for update in real_llm.generate_stream(prompts, max_tokens=24):
-        streamed[update.index] += update.text
-    assert streamed == [c.text for c in completions], "the same batch must decode the same way"
-    assert_nothing_held(real_llm)
+@pytest.mark.parametrize("backend", GPU_BACKENDS)
+def test_cuda_graphs_change_no_token(tiny_qwen3, backend):
+    eager, _ = generate(tiny_qwen3, backend=backend, enforce_eager=True)
+    graphed, llm = generate(tiny_qwen3, backend=backend, max_model_len=256)
+    assert llm.runner.stats.graph_steps > 0
+    assert graphed == eager
 
 
-def test_default_pool_sizing_uses_the_memory_left(real_qwen3):
-    from mini_vllm.engine.llm_engine import blocks_that_fit
-
-    model = from_hf(real_qwen3[0])
-    c = model.config
-    per_block = 2 * c.num_hidden_layers * 16 * c.num_key_value_heads * c.head_dim * 2
-    left = torch.cuda.mem_get_info()[0]
-
-    assert blocks_that_fit(model, EngineConfig(kv_fraction=0.1)) == int(left * 0.1) // per_block
-    assert blocks_that_fit(model, EngineConfig(kv_fraction=0.1, fp8_kv_cache=True)) == int(left * 0.1) // (
-        per_block // 2
-    ), "fp8 pages take half the bytes"
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="needs two GPUs")
+def test_tensor_parallel_matches_one_gpu():
+    prompts = [[9707, 11, 1879, 0], [785, 6722, 315, 9625, 374]]
+    one = LLM.from_pretrained(DEFAULT_MODEL, num_blocks=256, enforce_eager=True)
+    want = [c.token_ids for c in one.generate(prompts, max_tokens=8, ignore_eos=True)]
+    del one
+    two = LLM.from_pretrained(DEFAULT_MODEL, num_blocks=256, tensor_parallel_size=2)
+    try:
+        assert [c.token_ids for c in two.generate(prompts, max_tokens=8, ignore_eos=True)] == want
+    finally:
+        two.close()

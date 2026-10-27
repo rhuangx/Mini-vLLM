@@ -1,16 +1,20 @@
-"""RoPE: precomputed rotary tables, applied at explicit absolute positions."""
+"""RoPE: precomputed rotary tables, applied at explicit absolute positions, with Llama 3's
+frequency scaling when the checkpoint asks for it."""
 
 from __future__ import annotations
 
+import math
+
 import torch
+from torch import nn
 
 from mini_vllm.layers.backends import Backend, get_backend
 
-__all__ = ["RoPE", "apply_rope", "rotate_half"]
+__all__ = ["RotaryEmbedding", "apply_rope", "rotate_half"]
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
-    """[x1, x2] -> [-x2, x1], pairing element i with element i + D/2 as Qwen3 was trained."""
+    """[x1, x2] -> [-x2, x1], pairing element i with element i + D/2 as Qwen3 and Llama train."""
     half = x.shape[-1] // 2
     return torch.cat([-x[..., half:], x[..., :half]], dim=-1)
 
@@ -22,47 +26,48 @@ def apply_rope(
     # The head axis is inserted so one table row applies to every head of its token.
     cos = cos_table[positions.long()].unsqueeze(-2)
     sin = sin_table[positions.long()].unsqueeze(-2)
-
     x32 = x.float()
     return (x32 * cos + rotate_half(x32) * sin).to(x.dtype)
 
 
-class RoPE:
-    """Rotate x [B, L, H, D] by the angles at positions [B, L] or [L]."""
+def _llama3_frequencies(inverse: torch.Tensor, scaling: dict) -> torch.Tensor:
+    """Llama 3's long-context fix: low frequencies slowed by `factor`, high ones kept, and a
+    smooth blend between."""
+    factor, low, high = scaling["factor"], scaling["low_freq_factor"], scaling["high_freq_factor"]
+    old = scaling["original_max_position_embeddings"]
+    wavelength = 2 * math.pi / inverse
+    scaled = torch.where(wavelength > old / low, inverse / factor, inverse)
+    smooth = (old / wavelength - low) / (high - low)
+    blended = (1 - smooth) * scaled / factor + smooth * scaled
+    medium = (wavelength >= old / high) & (wavelength <= old / low)
+    return torch.where(medium, blended, scaled)
 
+
+class RotaryEmbedding(nn.Module):
     def __init__(
         self,
         head_dim: int,
-        max_seq_len: int,
-        theta: float = 1_000_000.0,
+        max_position: int,
+        base: float = 1_000_000.0,
+        scaling: dict | None = None,
         backend: str | Backend = "torch",
-        device: torch.device | None = None,
     ) -> None:
+        super().__init__()
         self.backend = get_backend(backend)
-        self.head_dim = head_dim
-        self.max_seq_len = max_seq_len
-        self.theta = theta
+        # Frequency i decays as base^(-2i/D): early pairs are local, late ones long-range.
+        inverse = 1.0 / (base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))
+        if scaling is not None:
+            inverse = _llama3_frequencies(inverse, scaling)
+        angles = torch.outer(torch.arange(max_position, dtype=torch.float32), inverse)
+        # Duplicated rather than interleaved, matching rotate_half; fp32, as a bf16 cosine near
+        # a zero crossing would shift tokens.
+        angles = torch.cat([angles, angles], dim=-1)
+        self.register_buffer("cos", torch.cos(angles), persistent=False)
+        self.register_buffer("sin", torch.sin(angles), persistent=False)
 
-        # Frequency i decays as theta^(-2i/D): early pairs are local, late ones long-range.
-        exponents = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device) / head_dim
-        inverse_frequencies = 1.0 / (theta**exponents)
-
-        positions = torch.arange(max_seq_len, dtype=torch.float32, device=device)
-        angles = torch.outer(positions, inverse_frequencies)  # max_seq_len x D/2
-
-        # Duplicated rather than interleaved, matching `rotate_half`.
-        angles = torch.cat([angles, angles], dim=-1)  # max_seq_len x D
-
-        # Tables stay fp32: a bf16 cosine near a zero crossing would shift tokens.
-        self.cos = torch.cos(angles)
-        self.sin = torch.sin(angles)
-
-    def _tables(self, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.cos.device != device:
-            self.cos = self.cos.to(device)
-            self.sin = self.sin.to(device)
-        return self.cos, self.sin
-
-    def __call__(self, x: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-        cos_table, sin_table = self._tables(x.device)
-        return self.backend.rope(x, positions, cos_table, sin_table)
+    def forward(
+        self, positions: torch.Tensor, q: torch.Tensor, k: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """q [T, H_q, D] and k [T, H_k, D], each token rotated by its own position."""
+        rope, cos, sin = self.backend.rope, self.cos, self.sin
+        return rope(q[None], positions, cos, sin)[0], rope(k[None], positions, cos, sin)[0]

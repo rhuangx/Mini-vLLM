@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 
 from mini_vllm.layers import activation, attention, layernorm, rotary_embedding
-from mini_vllm.layers.quantization import quantize_fp8
+
+if TYPE_CHECKING:
+    from mini_vllm.engine.model_runner import HostLists
 
 __all__ = ["TorchBackend"]
 
 
 class TorchBackend:
     name = "torch"
+    supports_graphs = False  # the paged path loops over sequences in Python
 
-    def swiglu(self, gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
-        return activation.swiglu(gate, up)
+    def silu_and_mul(self, x: torch.Tensor) -> torch.Tensor:
+        return activation.silu_and_mul(x)
 
     def rms_norm(self, x: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
         return layernorm.rms_norm(x, weight, eps)
+
+    def add_rms_norm(
+        self, x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        summed = x + residual
+        return self.rms_norm(summed, weight, eps), summed
 
     def rope(
         self, x: torch.Tensor, positions: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
@@ -45,7 +56,9 @@ class TorchBackend:
         scale: float | None = None,
         k_scale: float = 1.0,
         v_scale: float = 1.0,
-        host: tuple[list[list[int]], list[int], list[int]] | None = None,
+        host: HostLists | None = None,
+        num_short: tuple[int, int] = (0, 0),
+        max_query_len: int | None = None,
     ) -> torch.Tensor:
         return attention.paged_attention(
             query, key_pages, value_pages, block_tables, cu_seqlens_q, context_lens,
@@ -62,7 +75,8 @@ class TorchBackend:
         fp8_scales: tuple[float, float] | None = None,
     ) -> None:
         if fp8_scales is not None:
-            key, value = quantize_fp8(key, fp8_scales[0]), quantize_fp8(value, fp8_scales[1])
-        slots = slot_mapping.long()  # once for both: index_copy_ wants int64
+            key = attention.quantize_fp8(key, fp8_scales[0])
+            value = attention.quantize_fp8(value, fp8_scales[1])
+        slots = slot_mapping.long()  # once for both; never -1 here, as only captured batches pad
         key_pages.index_copy_(0, slots, key.to(key_pages.dtype))
         value_pages.index_copy_(0, slots, value.to(value_pages.dtype))

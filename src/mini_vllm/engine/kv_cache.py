@@ -10,7 +10,7 @@ import torch
 from mini_vllm.layers.backends import Backend, get_backend
 
 if TYPE_CHECKING:
-    from mini_vllm.engine.forward_batch import ForwardBatch
+    from mini_vllm.engine.model_runner import ForwardBatch
 
 __all__ = ["PagedKvPool"]
 
@@ -88,28 +88,13 @@ class PagedKvPool:
         v: torch.Tensor,
         backend: str | Backend = "torch",
     ) -> torch.Tensor:
-        """One layer's attention for a ragged batch: write the batch's keys and values into
-        their slots, then attend each sequence over its own pages. The model sees one row of
-        T flattened tokens: q is 1 x H_q x T x D, k and v are 1 x H_k x T x D."""
+        """One layer's attention for a ragged batch, all [T, H, D]: write the batch's keys and
+        values into their slots, then attend each sequence over its own pages."""
         backend = get_backend(backend)
-        # k, v arrive as 1 x H_k x T x D; the pool wants T x H_k x D, contiguous.
-        self.write(
-            layer,
-            batch.slot_mapping,
-            k[0].transpose(0, 1).contiguous(),
-            v[0].transpose(0, 1).contiguous(),
-            backend,
-        )
+        self.write(layer, batch.slot_mapping, k, v, backend)
         key_pages, value_pages = self.pages(layer)
-        out = backend.paged_attention(
-            q[0].transpose(0, 1),
-            key_pages,
-            value_pages,
-            batch.block_tables,
-            batch.cu_seqlens_q,
-            batch.context_lens,
-            k_scale=self.k_scale,
-            v_scale=self.v_scale,
-            host=batch.host,
+        return backend.paged_attention(
+            q, key_pages, value_pages, batch.block_tables, batch.cu_seqlens_q, batch.context_lens,
+            k_scale=self.k_scale, v_scale=self.v_scale, host=batch.host,
+            num_short=batch.num_short, max_query_len=batch.max_query_len,
         )
-        return out.transpose(0, 1)[None]

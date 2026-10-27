@@ -14,8 +14,7 @@ from mini_vllm.config import EngineConfig, ModelConfig, SchedulerConfig
 from mini_vllm.engine.llm_engine import LLM, Completion, StreamUpdate
 from mini_vllm.engine.sequence import Request, RequestStatus
 from mini_vllm.sampling_parameters import GREEDY, SamplingParams
-from mini_vllm.utils.loader import DEFAULT_MODEL, from_hf, load
-from mini_vllm.utils.tokenizer import Tokenizer
+from mini_vllm.utils.loader import DEFAULT_MODEL, Tokenizer, from_hf, load
 
 __all__ = [
     "DEFAULT_MODEL",

@@ -1,10 +1,13 @@
-"""Activations: softmax, silu, and the SwiGLU that gates Qwen3's MLP."""
+"""Activations: softmax, silu, and the SwiGLU that gates the MLP."""
 
 from __future__ import annotations
 
 import torch
+from torch import nn
 
-__all__ = ["silu", "softmax", "swiglu"]
+from mini_vllm.layers.backends import Backend, get_backend
+
+__all__ = ["SiluAndMul", "silu", "silu_and_mul", "softmax"]
 
 
 def softmax(x: torch.Tensor, axis: int = -1) -> torch.Tensor:
@@ -17,10 +20,20 @@ def softmax(x: torch.Tensor, axis: int = -1) -> torch.Tensor:
 
 
 def silu(x: torch.Tensor) -> torch.Tensor:
-    """x * sigmoid(x), the activation inside Qwen3's SwiGLU MLP."""
     return x * torch.sigmoid(x)
 
 
-def swiglu(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
-    """silu(gate) * up: the MLP's two up-projections merged before the down-projection."""
+def silu_and_mul(x: torch.Tensor) -> torch.Tensor:
+    """silu(gate) * up, with gate and up the two halves of x [..., 2I]: the merged gate_up
+    projection's output."""
+    gate, up = x.chunk(2, dim=-1)
     return silu(gate) * up
+
+
+class SiluAndMul(nn.Module):
+    def __init__(self, backend: str | Backend = "torch") -> None:
+        super().__init__()
+        self.backend = get_backend(backend)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.backend.silu_and_mul(x)

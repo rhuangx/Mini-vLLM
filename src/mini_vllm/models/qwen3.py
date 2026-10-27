@@ -1,145 +1,159 @@
-"""Qwen3, assembled from the operators: attention, MLP, transformer block, model."""
+"""Qwen3 as nn.Modules named like the Hugging Face checkpoint, so its tensors load by name; only
+q/k/v and gate/up are packed, as packed_modules_mapping says. Serving runs one flat row of
+tokens [T]; the forward context (utils/context.py) says where attention reads and writes."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import ClassVar
+
 import torch
+from torch import nn
 
 from mini_vllm.config import ModelConfig
+from mini_vllm.layers.activation import SiluAndMul
 from mini_vllm.layers.backends import Backend, get_backend
-from mini_vllm.layers.embedding_head import Embedding
+from mini_vllm.layers.embedding_head import ParallelLMHead, VocabParallelEmbedding
 from mini_vllm.layers.layernorm import RMSNorm
-from mini_vllm.layers.linear import linear
-from mini_vllm.layers.rotary_embedding import RoPE
+from mini_vllm.layers.linear import MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear
+from mini_vllm.layers.rotary_embedding import RotaryEmbedding
 from mini_vllm.utils.context import get_context
 
-__all__ = ["Qwen3MLP", "Qwen3Model", "Qwen3MultiHeadAttention", "Qwen3TransformerBlock"]
+__all__ = ["Qwen3Attention", "Qwen3DecoderLayer", "Qwen3ForCausalLM", "Qwen3MLP", "Qwen3Model"]
 
 
-class Qwen3MultiHeadAttention:
-    """Grouped-query attention with a per-head RMSNorm on q and k before RoPE."""
-
-    def __init__(
-        self,
-        config: ModelConfig,
-        wq: torch.Tensor,
-        wk: torch.Tensor,
-        wv: torch.Tensor,
-        wo: torch.Tensor,
-        q_norm: RMSNorm,
-        k_norm: RMSNorm,
-        rope: RoPE,
-        layer_idx: int,
-        backend: str | Backend = "torch",
-    ) -> None:
+class Qwen3Attention(nn.Module):
+    def __init__(self, config: ModelConfig, layer_idx: int, rotary_emb: RotaryEmbedding,
+                 backend: str | Backend = "torch") -> None:
+        super().__init__()
         self.layer_idx = layer_idx  # which layer of the forward's KV storage is this layer's
         self.backend = get_backend(backend)
-        self.num_heads = config.num_attention_heads
-        self.num_kv_heads = config.num_key_value_heads
-        self.head_dim = config.head_dim
-        self.wq, self.wk, self.wv, self.wo = wq, wk, wv, wo
-        self.q_norm, self.k_norm = q_norm, k_norm
-        self.rope = rope
+        d = self.head_dim = config.head_dim
+        self.qkv_proj = QKVParallelLinear(config.hidden_size, d, config.num_attention_heads,
+                                          config.num_key_value_heads)
+        self.num_heads, self.num_kv_heads = self.qkv_proj.num_heads, self.qkv_proj.num_kv_heads
+        self.o_proj = RowParallelLinear(config.num_attention_heads * d, config.hidden_size)
+        if config.qk_norm:
+            self.q_norm = RMSNorm(d, config.rms_norm_eps, backend)
+            self.k_norm = RMSNorm(d, config.rms_norm_eps, backend)
+        else:
+            self.q_norm = self.k_norm = None
+        self.rotary_emb = rotary_emb
 
-    def __call__(self, x: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-        batch, length, _ = x.shape
+    def forward(self, positions: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
+        d, heads, kv_heads = self.head_dim, self.num_heads, self.num_kv_heads
+        q, k, v = self.qkv_proj(hidden).split([heads * d, kv_heads * d, kv_heads * d], -1)
+        q, k, v = q.view(-1, heads, d), k.view(-1, kv_heads, d), v.view(-1, kv_heads, d)
+        if self.q_norm is not None:
+            q, k = self.q_norm(q), self.k_norm(k)
+        q, k = self.rotary_emb(positions, q, k)
 
-        q = linear(x, self.wq).reshape(batch, length, self.num_heads, self.head_dim)
-        k = linear(x, self.wk).reshape(batch, length, self.num_kv_heads, self.head_dim)
-        v = linear(x, self.wv).reshape(batch, length, self.num_kv_heads, self.head_dim)
-
-        # RoPE rotates B x L x H x D; attention wants B x H x L x D.
-        q = self.rope(self.q_norm(q), positions).transpose(1, 2)
-        k = self.rope(self.k_norm(k), positions).transpose(1, 2)
-        v = v.transpose(1, 2)
-
-        # The forward's storage takes this step's k and v and attends over everything it
-        # holds: each ragged sequence's own pages, or a dense history. Without any, the tokens
-        # see only each other.
+        # The forward's pool takes this step's k and v and attends over each ragged
+        # sequence's own pages; without one, the row is a single sequence seeing itself.
         context = get_context()
         if context.kv is not None:
             out = context.kv.attend(self.layer_idx, context.batch, q, k, v, self.backend)
-        elif context.dense_caches is not None:
-            out = context.dense_caches[self.layer_idx].attend(q, k, v, self.backend)
         else:
-            out = self.backend.dense_attention(q, k, v, mask="causal")
-        return linear(out.transpose(1, 2).reshape(batch, length, -1), self.wo)
+            rows = [x.transpose(0, 1)[None] for x in (q, k, v)]
+            out = self.backend.dense_attention(*rows, mask="causal")[0].transpose(0, 1)
+        return self.o_proj(out.reshape(-1, self.num_heads * d))
 
 
-class Qwen3MLP:
-    """down(silu(gate(x)) * up(x))."""
+class Qwen3MLP(nn.Module):
+    """down(silu(gate(x)) * up(x)), gate and up in one GEMM."""
 
-    def __init__(
-        self, w_gate: torch.Tensor, w_up: torch.Tensor, w_down: torch.Tensor, backend: str | Backend = "torch"
-    ) -> None:
-        self.w_gate, self.w_up, self.w_down = w_gate, w_up, w_down
-        self.backend = get_backend(backend)
+    def __init__(self, config: ModelConfig, backend: str | Backend = "torch") -> None:
+        super().__init__()
+        size = config.intermediate_size
+        self.gate_up_proj = MergedColumnParallelLinear(config.hidden_size, [size, size])
+        self.down_proj = RowParallelLinear(size, config.hidden_size)
+        self.act_fn = SiluAndMul(backend)
 
-    def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        gate, up = linear(x, self.w_gate), linear(x, self.w_up)
-        return linear(self.backend.swiglu(gate, up), self.w_down)
-
-
-class Qwen3TransformerBlock:
-    """Pre-norm residual block: x + attention(norm(x)), then h + mlp(norm(h))."""
-
-    def __init__(
-        self,
-        attention: Qwen3MultiHeadAttention,
-        mlp: Qwen3MLP,
-        input_layernorm: RMSNorm,
-        post_attention_layernorm: RMSNorm,
-    ) -> None:
-        self.attention = attention
-        self.mlp = mlp
-        self.input_layernorm = input_layernorm
-        self.post_attention_layernorm = post_attention_layernorm
-
-    def __call__(self, x: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-        h = x + self.attention(self.input_layernorm(x), positions)
-        return h + self.mlp(self.post_attention_layernorm(h))
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.down_proj(self.act_fn(self.gate_up_proj(x)))
 
 
-class Qwen3Model:
-    """Token ids [B, L] at positions [L] or [B, L] -> logits [B, L, V].
+class Qwen3DecoderLayer(nn.Module):
+    """Pre-norm residual block; each norm also adds the running residual, in one pass."""
 
-    rows selects which token rows get logits; None means all of them.
+    def __init__(self, config: ModelConfig, layer_idx: int, rotary_emb: RotaryEmbedding,
+                 backend: str | Backend = "torch") -> None:
+        super().__init__()
+        self.input_layernorm = RMSNorm(config.hidden_size, config.rms_norm_eps, backend)
+        self.self_attn = Qwen3Attention(config, layer_idx, rotary_emb, backend)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size, config.rms_norm_eps, backend)
+        self.mlp = Qwen3MLP(config, backend)
 
-    What attention caches in comes from the forward context (utils/context.py). With none,
-    every call attends only over its own tokens: the full-recompute oracle. With a KvFullCache
-    per layer, each call appends to one dense history per row. With a paged pool and a
-    ForwardBatch, B = 1 and L is the batch's T flattened tokens.
-    """
+    def forward(
+        self, positions: torch.Tensor, hidden: torch.Tensor, residual: torch.Tensor | None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if residual is None:
+            residual, hidden = hidden, self.input_layernorm(hidden)
+        else:
+            hidden, residual = self.input_layernorm(hidden, residual)
+        hidden, residual = self.post_attention_layernorm(self.self_attn(positions, hidden), residual)
+        return self.mlp(hidden), residual
 
-    def __init__(
-        self,
-        config: ModelConfig,
-        embedding: Embedding,
-        layers: list[Qwen3TransformerBlock],
-        norm: RMSNorm,
-        lm_head: torch.Tensor | None = None,
-    ) -> None:
-        self.config = config
-        self.embedding = embedding
-        self.layers = layers
-        self.norm = norm
-        self.lm_head = lm_head  # None when tied to the embedding table
 
-    def __call__(
-        self,
-        inputs: torch.Tensor,
-        positions: torch.Tensor,
-        rows: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        h = self.embedding(inputs)
+class Qwen3Model(nn.Module):
+    def __init__(self, config: ModelConfig, backend: str | Backend = "torch") -> None:
+        super().__init__()
+        self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size)
+        # One set of rotary tables, shared by every layer.
+        rotary_emb = RotaryEmbedding(config.head_dim, config.max_position_embeddings, config.rope_theta,
+                                     config.rope_scaling, backend)
+        self.layers = nn.ModuleList(
+            Qwen3DecoderLayer(config, index, rotary_emb, backend) for index in range(config.num_hidden_layers)
+        )
+        self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps, backend)
+
+    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        hidden, residual = self.embed_tokens(input_ids), None
         for layer in self.layers:
-            h = layer(h, positions)
+            hidden, residual = layer(positions, hidden, residual)
+        return self.norm(hidden, residual)[0]
 
-        # Only these token rows reach the LM head: one per sequence when serving, rather
-        # than a V-wide row for every prompt token in a chunk.
+
+class Qwen3ForCausalLM(nn.Module):
+    """Token ids [T] at positions [T] -> hidden states [T, E]; compute_logits takes the rows
+    that need them to logits [rows, V]."""
+
+    packed_modules_mapping: ClassVar[dict[str, tuple[str, str | int]]] = {
+        "q_proj": ("qkv_proj", "q"),
+        "k_proj": ("qkv_proj", "k"),
+        "v_proj": ("qkv_proj", "v"),
+        "gate_proj": ("gate_up_proj", 0),
+        "up_proj": ("gate_up_proj", 1),
+    }
+
+    def __init__(self, config: ModelConfig, backend: str | Backend = "torch") -> None:
+        super().__init__()
+        self.config = config
+        self.model = Qwen3Model(config, backend)
+        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
+        if config.tie_word_embeddings:
+            self.lm_head.weight = self.model.embed_tokens.weight
+
+    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        return self.model(input_ids, positions)
+
+    def compute_logits(self, hidden: torch.Tensor, rows: torch.Tensor | None = None) -> torch.Tensor | None:
+        """Logits for the selected rows (all when None): one per sequence when serving, rather
+        than a V-wide row for every prompt token in a chunk. None on tensor-parallel ranks > 0."""
         if rows is not None:
-            h = h[:, rows.long()]
-        h = self.norm(h)
+            hidden = hidden[rows.long()]
+        return self.lm_head(hidden)
 
-        if self.lm_head is None:
-            return self.embedding.as_linear(h)
-        return linear(h, self.lm_head)
+    def share_prefix(self, num_layers: int) -> Qwen3ForCausalLM:
+        """A draft made of this model's first num_layers layers and its head, sharing every
+        weight. A fresh shell, not a copy: copy.copy would share the module dict and truncate
+        this model too."""
+        draft = type(self).__new__(type(self))
+        nn.Module.__init__(draft)
+        draft.config = replace(self.config, num_hidden_layers=num_layers)
+        inner = Qwen3Model.__new__(Qwen3Model)
+        nn.Module.__init__(inner)
+        inner.embed_tokens, inner.norm = self.model.embed_tokens, self.model.norm
+        inner.layers = nn.ModuleList(self.model.layers[:num_layers])
+        draft.model, draft.lm_head = inner, self.lm_head
+        return draft

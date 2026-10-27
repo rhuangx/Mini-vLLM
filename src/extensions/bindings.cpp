@@ -4,7 +4,7 @@ namespace {
 
 TORCH_LIBRARY(mini_vllm_ext, m) {
   m.def("rms_norm(Tensor x, Tensor weight, float eps) -> Tensor");
-  m.def("swiglu(Tensor gate, Tensor up) -> Tensor");
+  m.def("silu_and_mul(Tensor x) -> Tensor");
   m.def("rope(Tensor x, Tensor positions, Tensor cos, Tensor sin) -> Tensor");
   m.def("paged_cache_update(Tensor(a!) pool, Tensor slot_mapping, Tensor values) -> ()");
   m.def("paged_attention(Tensor q, Tensor key_pages, Tensor value_pages, Tensor block_tables, Tensor cu_seqlens_q, "
@@ -16,7 +16,7 @@ TORCH_LIBRARY(mini_vllm_ext, m) {
 
 TORCH_LIBRARY_IMPL(mini_vllm_ext, CUDA, m) {
   m.impl("rms_norm", mini_vllm_ext::rms_norm);
-  m.impl("swiglu", mini_vllm_ext::swiglu);
+  m.impl("silu_and_mul", mini_vllm_ext::silu_and_mul);
   m.impl("rope", mini_vllm_ext::rope);
   m.impl("paged_cache_update", mini_vllm_ext::paged_cache_update);
   m.impl("paged_attention", mini_vllm_ext::paged_attention);

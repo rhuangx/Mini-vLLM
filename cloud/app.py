@@ -4,7 +4,6 @@ on the same workloads as the baseline. Run from the repository root:
     uv run --group cloud modal run -m cloud.app::download            # once: models into the volume
     uv run --group cloud modal run -m cloud.app::probe               # driver, versions, kernels work
     uv run --group cloud modal run -m cloud.app::tests               # the full pytest suite
-    uv run --group cloud modal run -m cloud.app::bench --script bench_operators.py
     uv run --group cloud modal run -m cloud.app::sweep --suite quick --engines mini-cuda,vllm --tag phase1
 
 Results go to the mini-vllm-results volume under <tag>/<time>-<commit>/, and a sweep's summary
@@ -93,20 +92,20 @@ def env_probe(run_dir: str) -> dict:
 
 @app.function(image=MINI, gpu=GPU, volumes=VOLUMES, timeout=3600, cpu=8.0, memory=32768)
 def run_pytest(run_dir: str, args: str) -> dict:
+    return _pytest(run_dir, args)
+
+
+@app.function(image=MINI, gpu=f"{GPU}:2", volumes=VOLUMES, timeout=3600, cpu=8.0, memory=65536)
+def run_pytest_tp(run_dir: str, args: str) -> dict:
+    """The tests that need two GPUs: tensor parallelism."""
+    return _pytest(run_dir, args or "-k tensor_parallel")
+
+
+def _pytest(run_dir: str, args: str) -> dict:
     out = Path(RESULTS) / run_dir
     command = [sys.executable, "-m", "pytest", "-ra", "-p", "no:cacheprovider",
                f"--junitxml={out / 'junit.xml'}", *shlex.split(args)]
     code, tail = _stream(command, out / "pytest.log")
-    results_volume.commit()
-    return {"returncode": code, "tail": tail}
-
-
-@app.function(image=MINI, gpu=GPU, volumes=VOLUMES, timeout=3600, cpu=8.0, memory=65536)
-def run_bench(run_dir: str, commit: str, script: str, args: str) -> dict:
-    out = Path(RESULTS) / run_dir / "benches"
-    env = {"MINI_VLLM_RESULTS": str(out), "MINI_VLLM_COMMIT": commit}
-    code, tail = _stream([sys.executable, f"benches/{script}", *shlex.split(args)],
-                         out / f"{Path(script).stem}.log", env)
     results_volume.commit()
     return {"returncode": code, "tail": tail}
 
@@ -148,6 +147,17 @@ def _measure(label, factory_fresh, release, workloads, geometry, peak, out: Path
 
 @app.function(image=MINI, gpu=GPU, volumes=VOLUMES, timeout=3 * 3600, cpu=8.0, memory=65536)
 def sweep_mini(run_dir: str, label: str, backend: str, workloads: list[dict], profiles: list[str]) -> dict:
+    return _sweep_mini(run_dir, label, backend, workloads, profiles, 1)
+
+
+@app.function(image=MINI, gpu=f"{GPU}:2", volumes=VOLUMES, timeout=3 * 3600, cpu=16.0, memory=131072)
+def sweep_mini_tp2(run_dir: str, label: str, backend: str, workloads: list[dict],
+                   profiles: list[str]) -> dict:
+    return _sweep_mini(run_dir, label, backend, workloads, [], 2)
+
+
+def _sweep_mini(run_dir: str, label: str, backend: str, workloads: list[dict], profiles: list[str],
+                tensor_parallel_size: int) -> dict:
     from transformers import AutoConfig
 
     from cloud import adapters, metrics, profile_engine
@@ -158,9 +168,10 @@ def sweep_mini(run_dir: str, label: str, backend: str, workloads: list[dict], pr
     out.mkdir(parents=True, exist_ok=True)
     env = metrics.environment()
     geometry = metrics.Geometry.from_hf_config(AutoConfig.from_pretrained(ENGINE["model"]))
-    factory = adapters.MiniVllmFactory(backend)
+    factory = adapters.MiniVllmFactory(backend, tensor_parallel_size=tensor_parallel_size)
     result = {
-        "label": label, "engine": "mini-vllm", "backend": backend, "env": env, "load_s": factory.load_s,
+        "label": label, "engine": "mini-vllm", "backend": backend,
+        "tensor_parallel_size": tensor_parallel_size, "env": env, "load_s": factory.load_s,
         "kv_blocks": ENGINE["num_blocks"], "geometry": asdict(geometry), "engine_config": ENGINE,
         "workloads": _measure(label, factory.fresh, factory.release, workloads, geometry,
                               env["peak_bandwidth"], out),
@@ -201,55 +212,6 @@ def sweep_vllm(run_dir: str, label: str, enforce_eager: bool, workloads: list[di
     return result
 
 
-@app.function(image=MINI, gpu=GPU, volumes=VOLUMES, timeout=2 * 3600, cpu=8.0, memory=65536)
-def ab_mini(
-    run_dir: str, versions: dict[str, bytes], backend: str, workloads: list[dict], rounds: int
-) -> dict:
-    """Run each version of src/mini_vllm on the same workloads in this one container, in
-    alternating order (A B, B A, ...), each in a fresh process: host speed varies between
-    containers far more than a refactor moves a host-bound step, but not within one."""
-    import io
-    import statistics
-    import tarfile
-
-    roots = {}
-    for name, archive in versions.items():
-        root = Path("/tmp/ab") / name.split()[-1]
-        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-            tar.extractall(root, filter="data")
-        roots[name] = root
-    runs: dict[str, list[dict]] = {name: [] for name in versions}
-    for round_index in range(rounds):
-        order = list(versions) if round_index % 2 == 0 else list(reversed(versions))
-        for name in order:
-            env = {**os.environ, "PYTHONPATH": f"{roots[name]}/src:{REMOTE}/src/extensions:/root"}
-            done = subprocess.run(
-                [sys.executable, "-m", "cloud.ab_worker", backend, json.dumps(workloads)],
-                env=env, cwd="/root", capture_output=True, text=True,
-            )
-            if done.returncode != 0:
-                raise RuntimeError(f"{name} failed:\n{done.stderr[-3000:]}")
-            runs[name].append(json.loads(done.stdout.strip().splitlines()[-1]))
-            print(f"round {round_index + 1}, {name}: {runs[name][-1]['workloads']}")
-
-    names = list(versions)
-    summary = {}
-    for workload in runs[names[0]][0]["workloads"]:
-        row = {}
-        for name in names:
-            row[name] = {
-                metric: statistics.median(run["workloads"][workload][metric] for run in runs[name])
-                for metric in ("output_tok_s", "tpot_p50_ms", "step_p50_ms")
-            }
-        base, head = row[names[0]]["output_tok_s"], row[names[1]]["output_tok_s"]
-        row["tok_s_change"] = (head - base) / base
-        summary[workload] = row
-    result = {"versions": names, "backend": backend, "rounds": rounds, "summary": summary, "runs": runs}
-    _save(Path(RESULTS) / run_dir / "ab.json", result)
-    results_volume.commit()
-    return result
-
-
 # Local entry points.
 
 def _run_dir(tag: str) -> tuple[str, str]:
@@ -279,21 +241,14 @@ def probe(tag: str = "probe") -> None:
 
 
 @app.local_entrypoint()
-def tests(args: str = "", tag: str = "tests") -> None:
+def tests(args: str = "", tag: str = "tests", gpus: int = 1) -> None:
     run_dir, _ = _run_dir(tag)
-    outcome = run_pytest.remote(run_dir, args)
+    outcome = (run_pytest_tp if gpus > 1 else run_pytest).remote(run_dir, args)
     print("\n".join(outcome["tail"][-15:]))
     print(f"\npytest exited {outcome['returncode']}; "
           f"log and junit.xml in volume mini-vllm-results:/{run_dir}")
     if outcome["returncode"] != 0:
         sys.exit(outcome["returncode"])
-
-
-@app.local_entrypoint()
-def bench(script: str, args: str = "", tag: str = "benches") -> None:
-    run_dir, commit = _run_dir(tag)
-    outcome = run_bench.remote(run_dir, commit, script, args)
-    print(f"\n{script} exited {outcome['returncode']}; plots in volume mini-vllm-results:/{run_dir}/benches")
 
 
 @app.local_entrypoint()
@@ -306,12 +261,13 @@ def sweep(suite: str = "quick", engines: str = "mini-cuda,vllm", tag: str = "adh
     calls = {}
     for label in engines.split(","):
         if label.startswith("mini-"):
-            backend = label.removeprefix("mini-")
+            backend, _, parallel = label.removeprefix("mini-").partition("-tp")
+            sweep = sweep_mini_tp2 if parallel == "2" else sweep_mini
             torch_only = backend == "torch" and suite not in ("smoke", "none")
             names = SUITES["torch"] if torch_only else SUITES[suite]
             # At ~0.5 s a step, the pure path is not traced at 256 in flight.
             traced = [name for name in PROFILES if backend != "torch" or name != "decode-256-in-flight"]
-            calls[label] = sweep_mini.spawn(run_dir, label, backend, [asdict(w) for w in names],
+            calls[label] = sweep.spawn(run_dir, label, backend, [asdict(w) for w in names],
                                             traced if profile else [])
         elif label in ("vllm", "vllm-eager"):
             if not SUITES[suite]:
@@ -319,7 +275,7 @@ def sweep(suite: str = "quick", engines: str = "mini-cuda,vllm", tag: str = "adh
             calls[label] = sweep_vllm.spawn(run_dir, label, label == "vllm-eager",
                                             [asdict(w) for w in SUITES[suite]])
         else:
-            raise ValueError(f"unknown engine {label!r}: mini-<backend>, vllm or vllm-eager")
+            raise ValueError(f"unknown engine {label!r}: mini-<backend>[-tp2], vllm or vllm-eager")
 
     results = {}
     for label, call in calls.items():
@@ -338,32 +294,3 @@ def sweep(suite: str = "quick", engines: str = "mini-cuda,vllm", tag: str = "adh
     print(f"\nsaved {local}/summary.json and report.md; traces: "
           f"modal volume get mini-vllm-results /{run_dir} results/modal/{run_dir}")
 
-
-def _archive(revision: str) -> bytes:
-    """src/mini_vllm as it was at revision, as a tar."""
-    return subprocess.run(["git", "archive", "--format=tar", revision, "src/mini_vllm"],
-                          cwd=REPO, capture_output=True, check=True).stdout
-
-
-@app.local_entrypoint()
-def ab(base: str = "HEAD~1", head: str = "HEAD", backend: str = "cuda", suite: str = "ab",
-       rounds: int = 3, tag: str = "ab") -> None:
-    """Compare two commits of src/mini_vllm in one container: the regression check for
-    host-bound points, which move with the container's CPU."""
-    def sha(revision: str) -> str:
-        return subprocess.run(["git", "rev-parse", "--short", revision], cwd=REPO,
-                              capture_output=True, text=True, check=True).stdout.strip()
-
-    run_dir, _ = _run_dir(tag)
-    versions = {f"base {sha(base)}": _archive(base), f"head {sha(head)}": _archive(head)}
-    result = ab_mini.remote(run_dir, versions, backend, [asdict(w) for w in SUITES[suite]], rounds)
-    names = result["versions"]
-    print(f"\n| workload | {names[0]} tok/s | {names[1]} tok/s | change | step p50 ms |")
-    print("|---|---|---|---|---|")
-    for workload, row in result["summary"].items():
-        a, b = row[names[0]], row[names[1]]
-        print(f"| {workload} | {a['output_tok_s']:.0f} | {b['output_tok_s']:.0f} "
-              f"| {row['tok_s_change']:+.1%} | {a['step_p50_ms']:.1f} → {b['step_p50_ms']:.1f} |")
-    local = REPO / "results" / "modal" / run_dir
-    _save(local / "ab.json", result)
-    print(f"\nmedians of {rounds} alternating rounds; saved {local / 'ab.json'}")

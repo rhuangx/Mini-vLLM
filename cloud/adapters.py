@@ -8,7 +8,6 @@ vLLM image has no Mini-vLLM.
 from __future__ import annotations
 
 import gc
-import inspect
 import time
 from collections import Counter
 from typing import Any
@@ -61,33 +60,33 @@ class MiniVllmFactory:
     """The model loads once; every workload gets a fresh engine over it, so no KV pool, prefix
     cache or scheduler state carries from one workload into the next."""
 
-    def __init__(self, backend: str, engine: dict = ENGINE) -> None:
+    def __init__(self, backend: str, engine: dict = ENGINE, tensor_parallel_size: int = 1) -> None:
         import torch
 
         from mini_vllm import LLM, EngineConfig
 
         self.torch, self.LLM = torch, LLM
         self.config = EngineConfig(
+            backend=backend,
             num_blocks=engine["num_blocks"],
             block_size=engine["block_size"],
             max_sequences=engine["max_num_seqs"],
             max_batched_tokens=engine["max_num_batched_tokens"],
             chunk_size=engine["max_num_batched_tokens"],  # like vLLM: one request may take the budget
             enable_prefix_caching=engine["prefix_caching"],
+            max_model_len=engine["max_model_len"],
+            tensor_parallel_size=tensor_parallel_size,
         )
-        # Checkouts before the backend switch took use_cuda; take whichever this one has.
-        parameters = inspect.signature(LLM.from_pretrained).parameters
-        if "backend" in parameters:
-            kernel = {"backend": backend}
-        elif backend in ("torch", "cuda"):
-            kernel = {"use_cuda": backend == "cuda"}
-        else:
-            raise ValueError(f"backend {backend!r} needs a checkout with the backend switch")
         began = time.perf_counter()
-        base = LLM.from_pretrained(engine["model"], **kernel, num_blocks=1)
+        if tensor_parallel_size > 1:
+            # The workers hold their shards for the engine's life: one engine serves every workload.
+            self.shared = LLM.from_pretrained(engine["model"], **vars(self.config))
+        else:
+            self.shared = None
+            base = LLM.from_pretrained(engine["model"], backend=backend, num_blocks=1, enforce_eager=True)
+            self.model, self.tokenizer = base.model, base.tokenizer
+            del base
         self.load_s = time.perf_counter() - began
-        self.model, self.tokenizer = base.model, base.tokenizer
-        del base
         self._release()
 
     def _release(self) -> None:
@@ -95,7 +94,7 @@ class MiniVllmFactory:
         self.torch.cuda.empty_cache()
 
     def fresh(self) -> MiniVllmAdapter:
-        llm = self.LLM(self.model, self.tokenizer, self.config)
+        llm = self.shared or self.LLM(self.model, self.tokenizer, self.config)
         llm.generate([[1000] * 32, [1001] * 8], max_tokens=4)  # the first pass pays kernel setup
         return MiniVllmAdapter(llm)
 

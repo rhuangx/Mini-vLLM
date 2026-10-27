@@ -4,29 +4,47 @@ shapes a kernel does not take."""
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import torch
 
 from mini_vllm.layers.attention import gather_pages
+from mini_vllm.layers.backends import SHORT_QUERY
 from mini_vllm.layers.backends.torch_backend import TorchBackend
 
-__all__ = ["SHORT_QUERY", "CudaBackend"]
+if TYPE_CHECKING:
+    from mini_vllm.engine.model_runner import HostLists
 
-# decode_attention and the paged kernel give every query token its own thread block, so they
-# take sequences of at most this many query tokens: decodes and speculative verifies.
-SHORT_QUERY = 8
+__all__ = ["CudaBackend", "split_short"]
+
+
+def split_short(
+    cu_seqlens_q: torch.Tensor, host: HostLists | None, num_short: tuple[int, int], max_query_len: int | None
+) -> tuple[int, int, bool]:
+    """(sequences, tokens) of the leading run of short sequences, and whether that is all of
+    them. The engine puts decodes first and says so; a direct call is worked out here."""
+    if max_query_len is not None and max_query_len <= SHORT_QUERY:
+        return len(cu_seqlens_q) - 1, -1, True
+    if num_short != (0, 0) or max_query_len is not None:
+        return num_short[0], num_short[1], False
+    starts = cu_seqlens_q.tolist() if host is None else host.offsets
+    count = 0
+    while count < len(starts) - 1 and starts[count + 1] - starts[count] <= SHORT_QUERY:
+        count += 1
+    return count, starts[count], count == len(starts) - 1
 
 
 class CudaBackend(TorchBackend):
     name = "cuda"
+    supports_graphs = True
 
     def __init__(self) -> None:
         import mini_vllm_ext  # raises here when src/extensions is not built
 
         self.ext = mini_vllm_ext
 
-    def swiglu(self, gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
-        return self.ext.swiglu(gate, up)
+    def silu_and_mul(self, x: torch.Tensor) -> torch.Tensor:
+        return self.ext.silu_and_mul(x)
 
     def rms_norm(self, x: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
         return self.ext.rms_norm(x, weight, eps)
@@ -34,7 +52,6 @@ class CudaBackend(TorchBackend):
     def rope(
         self, x: torch.Tensor, positions: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
     ) -> torch.Tensor:
-        # The same fp32 tables, gathered in the kernel.
         return self.ext.rope(x, positions, cos, sin)
 
     def dense_attention(
@@ -46,8 +63,7 @@ class CudaBackend(TorchBackend):
         mask: torch.Tensor | str | None = None,
     ) -> torch.Tensor:
         """A causal or unmasked call goes to decode_attention for a few query tokens, or to
-        flash_prefill for a bf16, D = 128 prefill; anything else, an additive mask included,
-        runs on the pure path."""
+        flash_prefill for a bf16, D = 128 prefill; anything else runs on the pure path."""
         if isinstance(mask, torch.Tensor):
             return super().dense_attention(query, key, value, scale, mask)
         head_dim = query.shape[-1]
@@ -71,60 +87,42 @@ class CudaBackend(TorchBackend):
         scale: float | None = None,
         k_scale: float = 1.0,
         v_scale: float = 1.0,
-        host: tuple[list[list[int]], list[int], list[int]] | None = None,
+        host: HostLists | None = None,
+        num_short: tuple[int, int] = (0, 0),
+        max_query_len: int | None = None,
     ) -> torch.Tensor:
-        """The sequences computing at most SHORT_QUERY tokens (decodes) go to one paged kernel
-        that walks the block tables itself. It gives each query token a thread block, so a
+        """The leading short sequences (decodes) go to one paged kernel that walks the block
+        tables itself, as contiguous slices. It gives each query token a thread block, so a
         long chunk would re-read its whole context once per token: those gather their pages
         and take dense_attention instead."""
         if scale is None:
             scale = query.shape[-1] ** -0.5
-        starts, lengths = (cu_seqlens_q.tolist(), context_lens.tolist()) if host is None else host[1:]
-
-        short = [i for i in range(len(lengths)) if starts[i + 1] - starts[i] <= SHORT_QUERY]
-        if len(short) == len(lengths):
+        short_seqs, short_tokens, all_short = split_short(cu_seqlens_q, host, num_short, max_query_len)
+        if all_short:
             pages = (key_pages, value_pages, block_tables, cu_seqlens_q, context_lens)
             return self.ext.paged_attention(query, *pages, scale, k_scale, v_scale)
 
-        pieces = {}
-        if short:
-            # A mixed batch: the decodes as one sub-batch, whose rows are split back out below.
-            rows = [row for i in short for row in range(starts[i], starts[i + 1])]
-            sub_starts = [0]
-            for i in short:
-                sub_starts.append(sub_starts[-1] + starts[i + 1] - starts[i])
-            chosen = torch.tensor(short, dtype=torch.long, device=block_tables.device)
-            attended = self.ext.paged_attention(
-                query[torch.tensor(rows, dtype=torch.long, device=query.device)],
-                key_pages,
-                value_pages,
-                block_tables[chosen],
-                torch.tensor(sub_starts, dtype=torch.int32, device=query.device),
-                context_lens[chosen],
-                scale,
-                k_scale,
-                v_scale,
+        out = torch.empty_like(query)
+        if short_seqs:
+            out[:short_tokens] = self.ext.paged_attention(
+                query[:short_tokens], key_pages, value_pages, block_tables[:short_seqs],
+                cu_seqlens_q[: short_seqs + 1], context_lens[:short_seqs], scale, k_scale, v_scale,
             )
-            pieces = {i: attended[sub_starts[j] : sub_starts[j + 1]] for j, i in enumerate(short)}
-
-        outputs = []
-        for index, context_len in enumerate(lengths):
-            if index in pieces:
-                outputs.append(pieces[index])
-                continue
+        if host is None:
+            starts, lengths = cu_seqlens_q.tolist(), context_lens.tolist()
+        else:
+            starts, lengths = host.offsets, host.context_lens
+        for index in range(short_seqs, len(lengths)):
             start, end = starts[index], starts[index + 1]
             keys, values = gather_pages(
-                key_pages, value_pages, block_tables[index], context_len, k_scale, v_scale, query.dtype
+                key_pages, value_pages, block_tables[index], lengths[index], k_scale, v_scale, query.dtype
             )
             attended = self.dense_attention(
-                query[start:end].transpose(0, 1),
-                keys.transpose(0, 1),
-                values.transpose(0, 1),
-                scale=scale,
-                mask="causal",
+                query[start:end].transpose(0, 1), keys.transpose(0, 1), values.transpose(0, 1),
+                scale=scale, mask="causal",
             )
-            outputs.append(attended.transpose(0, 1))
-        return torch.cat(outputs, dim=0)
+            out[start:end] = attended.transpose(0, 1)
+        return out
 
     def write_kv(
         self,
@@ -135,7 +133,7 @@ class CudaBackend(TorchBackend):
         value: torch.Tensor,
         fp8_scales: tuple[float, float] | None = None,
     ) -> None:
-        """In place, as the pure path is: the kernels quantize to fp8 in the same pass."""
+        """In place; the kernels skip slot -1 and quantize to fp8 in the same pass."""
         if fp8_scales is not None:
             self.ext.kv_quantize_scatter(key_pages, slot_mapping, key, fp8_scales[0])
             self.ext.kv_quantize_scatter(value_pages, slot_mapping, value, fp8_scales[1])
