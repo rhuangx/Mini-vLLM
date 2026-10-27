@@ -16,8 +16,8 @@ parser.add_argument("--temperature", type=float, default=0.0, help="0 is greedy"
 parser.add_argument("--stream", action="store_true", help="print each token as it arrives")
 parser.add_argument("--num-blocks", type=int, default=1024, help="KV pages of 16 tokens")
 parser.add_argument("--fp8-kv-cache", action="store_true")
-parser.add_argument("--backend", choices=["torch", "cuda"], default="torch",
-                    help="cuda runs the kernels in src/extensions/")
+parser.add_argument("--backend", choices=["torch", "cuda", "triton"], default="torch",
+                    help="cuda: the kernels in src/extensions/; triton: the Triton kernels")
 args = parser.parse_args()
 
 llm = LLM.from_pretrained(
