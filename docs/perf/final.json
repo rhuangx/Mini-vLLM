@@ -1,0 +1,1845 @@
+{
+  "mini-cuda": {
+    "label": "mini-cuda",
+    "engine": "mini-vllm",
+    "backend": "cuda",
+    "tensor_parallel_size": 1,
+    "env": {
+      "device": "NVIDIA H100 80GB HBM3",
+      "capability": "9.0",
+      "memory_gb": 79.2,
+      "sms": 132,
+      "cpu": "unknown",
+      "cpus": 24,
+      "python_loop_ms": 50.9,
+      "driver": "610.57.04",
+      "max_sm_clock": "1980 MHz",
+      "max_mem_clock": "2619 MHz",
+      "power_limit": "700.00 W",
+      "peak_bandwidth": 3350000000000.0,
+      "torch": "2.14.1+cu130",
+      "cuda": "13.0",
+      "python": "3.12.10",
+      "triton": "3.8.0"
+    },
+    "load_s": 7.671916027999998,
+    "kv_blocks": 12288,
+    "geometry": {
+      "weight_bytes": 15136811008,
+      "kv_bytes_per_token": 147456
+    },
+    "engine_config": {
+      "model": "Qwen/Qwen3-8B",
+      "block_size": 16,
+      "num_blocks": 12288,
+      "max_num_seqs": 256,
+      "max_num_batched_tokens": 4096,
+      "max_model_len": 4096,
+      "prefix_caching": true
+    },
+    "workloads": [
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 4,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 1,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-1-in-flight",
+          "load": "1 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 4,
+          "wall_s": 15.421402463000003,
+          "output_tokens": 2048,
+          "output_tok_s": 132.80244808561932,
+          "total_tok_s": 166.00306010702417,
+          "requests_s": 0.25937978141722523,
+          "ttft_ms": {
+            "mean": 24.27442025000026,
+            "p50": 13.698109999999986,
+            "p90": 56.12641800000162,
+            "p99": 56.12641800000162,
+            "max": 56.12641800000162
+          },
+          "tpot_ms": {
+            "mean": 7.49721022896282,
+            "p50": 7.49653690410959,
+            "p90": 7.502188704500974,
+            "p99": 7.502188704500974,
+            "max": 7.502188704500974
+          },
+          "itl_ms": {
+            "mean": 7.49721022896282,
+            "p50": 7.492502000001622,
+            "p90": 7.785070000004168,
+            "p99": 7.8409149999956185,
+            "max": 8.055154000000897
+          }
+        },
+        "mbu_estimate": 0.6053189530370062,
+        "steps": {
+          "decode_steps": 2044,
+          "forward_mbu": {
+            "mean": 0.627016930917029,
+            "p50": 0.6277250052734972,
+            "p90": 0.6524819771756838,
+            "p99": 0.6573786757807816,
+            "max": 0.6584853955752176
+          },
+          "step_mbu": {
+            "mean": 0.603649225244202,
+            "p50": 0.6036936799850675,
+            "p90": 0.6272380650258979,
+            "p99": 0.6311306146215652,
+            "max": 0.6330832658304066
+          },
+          "step_ms": {
+            "mean": 7.490955540606679,
+            "p50": 7.485841000001159,
+            "p90": 7.7790899999996554,
+            "p99": 7.83468799999909,
+            "max": 8.047920999999292
+          },
+          "forward_ms": {
+            "mean": 7.212114611250547,
+            "p50": 7.201888084411621,
+            "p90": 7.501408100128174,
+            "p99": 7.552735805511475,
+            "max": 7.563199996948242
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 32,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 16,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-16-in-flight",
+          "load": "16 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 32,
+          "wall_s": 10.969422045999998,
+          "output_tokens": 16384,
+          "output_tok_s": 1493.6064936962134,
+          "total_tok_s": 1867.0081171202667,
+          "requests_s": 2.917200183000417,
+          "ttft_ms": {
+            "mean": 121.287063999997,
+            "p50": 123.78341199999454,
+            "p90": 123.78341199999454,
+            "p99": 123.78341199999454,
+            "max": 123.78341199999454
+          },
+          "tpot_ms": {
+            "mean": 10.495931157534253,
+            "p50": 10.498631174168304,
+            "p90": 10.498631174168304,
+            "p99": 10.498631174168304,
+            "max": 10.498631174168304
+          },
+          "itl_ms": {
+            "mean": 10.495931157534253,
+            "p50": 10.477162000000817,
+            "p90": 11.662655999998606,
+            "p99": 11.90776900000401,
+            "max": 12.816913000001762
+          }
+        },
+        "mbu_estimate": 0.45707890675313095,
+        "steps": {
+          "decode_steps": 1022,
+          "forward_mbu": {
+            "mean": 0.45410439325081114,
+            "p50": 0.4519736876314844,
+            "p90": 0.510719714634632,
+            "p99": 0.5209258912276782,
+            "max": 0.5240848638383064
+          },
+          "step_mbu": {
+            "mean": 0.43458942911297915,
+            "p50": 0.43247377956695515,
+            "p90": 0.4883910205398937,
+            "p99": 0.4979557963427685,
+            "max": 0.49999180249615116
+          },
+          "step_ms": {
+            "mean": 10.479923822896339,
+            "p50": 10.455079999999839,
+            "p90": 11.646731999995552,
+            "p99": 11.892367999998044,
+            "max": 12.776077999994584
+          },
+          "forward_ms": {
+            "mean": 10.03109253735925,
+            "p50": 10.00928020477295,
+            "p90": 11.18057632446289,
+            "p99": 11.412192344665527,
+            "max": 11.430015563964844
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 128,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 64,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-64-in-flight",
+          "load": "64 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 128,
+          "wall_s": 22.300547345000005,
+          "output_tokens": 65536,
+          "output_tok_s": 2938.761949925583,
+          "total_tok_s": 3673.452437406979,
+          "requests_s": 5.739769433448404,
+          "ttft_ms": {
+            "mean": 305.020327046877,
+            "p50": 252.06099300000062,
+            "p90": 483.23914400000234,
+            "p99": 494.7669270000006,
+            "max": 509.8925919999999
+          },
+          "tpot_ms": {
+            "mean": 21.205556936047575,
+            "p50": 21.34007254794521,
+            "p90": 21.35845203522505,
+            "p99": 21.35845203522505,
+            "max": 21.78125533463797
+          },
+          "itl_ms": {
+            "mean": 21.205556936047575,
+            "p50": 21.04340999999721,
+            "p90": 25.775179000000037,
+            "p99": 26.639381000002516,
+            "max": 252.07465999999812
+          }
+        },
+        "mbu_estimate": 0.266126348811884,
+        "steps": {
+          "decode_steps": 1020,
+          "forward_mbu": {
+            "mean": 0.2388730152627654,
+            "p50": 0.2345640733498237,
+            "p90": 0.30414273085950744,
+            "p99": 0.3216783387871082,
+            "max": 0.5616732223193904
+          },
+          "step_mbu": {
+            "mean": 0.22814219684614806,
+            "p50": 0.2225817127246642,
+            "p90": 0.2896620388018312,
+            "p99": 0.3058007217494258,
+            "max": 0.530965113595667
+          },
+          "step_ms": {
+            "mean": 20.814085136274496,
+            "p50": 20.71152100000262,
+            "p90": 25.729597000008653,
+            "p99": 26.57566300000269,
+            "max": 28.437678999999605
+          },
+          "forward_ms": {
+            "mean": 19.896658126045676,
+            "p50": 19.80188751220703,
+            "p90": 24.699840545654297,
+            "p99": 25.489791870117188,
+            "max": 25.512672424316406
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 512,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 256,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-256-in-flight",
+          "load": "256 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 512,
+          "wall_s": 68.202424679,
+          "output_tokens": 262144,
+          "output_tok_s": 3843.61701557974,
+          "total_tok_s": 4804.521269474675,
+          "requests_s": 7.5070644835541795,
+          "ttft_ms": {
+            "mean": 728.0782214531214,
+            "p50": 482.699096999994,
+            "p90": 1744.6321939999905,
+            "p99": 2099.2001449999975,
+            "max": 2099.2001449999975
+          },
+          "tpot_ms": {
+            "mean": 65.15850205498946,
+            "p50": 65.4736175812133,
+            "p90": 65.88275534637967,
+            "p99": 66.30673001369865,
+            "max": 66.30673001369865
+          },
+          "itl_ms": {
+            "mean": 65.15850205498947,
+            "p50": 63.61580099999742,
+            "p90": 82.67933499999458,
+            "p99": 241.88716999999826,
+            "max": 302.87867299999505
+          }
+        },
+        "mbu_estimate": 0.13904517743808345,
+        "steps": {
+          "decode_steps": 1014,
+          "forward_mbu": {
+            "mean": 0.10653131523753065,
+            "p50": 0.10101199787354849,
+            "p90": 0.14693948300696608,
+            "p99": 0.15917095419277374,
+            "max": 0.3814729435814265
+          },
+          "step_mbu": {
+            "mean": 0.1004403091391841,
+            "p50": 0.09555606957556509,
+            "p90": 0.1377163884389968,
+            "p99": 0.14982699053864537,
+            "max": 0.3266916822218829
+          },
+          "step_ms": {
+            "mean": 62.600052845167525,
+            "p50": 61.961162999992325,
+            "p90": 82.21902500000056,
+            "p99": 85.61865899997656,
+            "max": 90.83101599999566
+          },
+          "forward_ms": {
+            "mean": 59.10820139465483,
+            "p50": 58.76710510253906,
+            "p90": 77.90739440917969,
+            "p99": 81.15721893310547,
+            "max": 81.30406188964844
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "prefill-heavy",
+          "num_requests": 32,
+          "input_len": 2048,
+          "output_len": 16,
+          "concurrency": 8,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "prefill-heavy-8-in-flight",
+          "load": "8 in flight",
+          "description": "2048 in, 16 out"
+        },
+        "summary": {
+          "requests": 32,
+          "wall_s": 5.307936436000006,
+          "output_tokens": 512,
+          "output_tok_s": 96.45933145081835,
+          "total_tok_s": 12443.253757155568,
+          "requests_s": 6.028708215676147,
+          "ttft_ms": {
+            "mean": 410.37320015625676,
+            "p50": 278.33060899999396,
+            "p90": 820.2990999999997,
+            "p99": 1167.0945500000016,
+            "max": 1167.0945500000016
+          },
+          "tpot_ms": {
+            "mean": 60.67913134166657,
+            "p50": 66.6861889999988,
+            "p90": 75.21261853333385,
+            "p99": 78.76646073333404,
+            "max": 78.76646073333404
+          },
+          "itl_ms": {
+            "mean": 60.67913134166657,
+            "p50": 13.975445999989233,
+            "p90": 275.6105130000037,
+            "p99": 278.5833770000181,
+            "max": 278.6579050000171
+          }
+        },
+        "mbu_estimate": 0.37511776002068264,
+        "steps": {
+          "decode_steps": 47,
+          "forward_mbu": {
+            "mean": 0.3453469026984718,
+            "p50": 0.3408281498742442,
+            "p90": 0.3435203846243906,
+            "p99": 0.45402600227359324,
+            "max": 0.45402600227359324
+          },
+          "step_mbu": {
+            "mean": 0.327617335158631,
+            "p50": 0.32463964199110495,
+            "p90": 0.32757594041488586,
+            "p99": 0.4193658441291102,
+            "max": 0.4193658441291102
+          },
+          "step_ms": {
+            "mean": 13.830381914893204,
+            "p50": 13.923239999996895,
+            "p90": 14.071543999989444,
+            "p99": 14.773031999993691,
+            "max": 14.773031999993691
+          },
+          "forward_ms": {
+            "mean": 13.125684413504093,
+            "p50": 13.261919975280762,
+            "p90": 13.285183906555176,
+            "p99": 13.762016296386719,
+            "max": 13.762016296386719
+          }
+        }
+      }
+    ],
+    "profiles": {
+      "decode-16-in-flight": {
+        "workload": "profile-decode-16-in-flight",
+        "active_steps": 10,
+        "step_ms": 10.657016899999999,
+        "gpu_ms_per_step": 8.696379899999997,
+        "gpu_busy": 0.8160238443461602,
+        "kernels_per_step": 781.0,
+        "categories_ms_per_step": {
+          "gemm": 5.866,
+          "attention": 1.813,
+          "norm": 0.299,
+          "copy": 0.287,
+          "rope": 0.127,
+          "kv_write": 0.11,
+          "elementwise": 0.108,
+          "activation": 0.076,
+          "sampling": 0.011
+        },
+        "spans_ms_per_step": {
+          "schedule": 0.079,
+          "prepare": 0.285,
+          "forward": 1.331,
+          "sample": 8.727,
+          "spec.verify": 0.011,
+          "commit": 0.027
+        },
+        "top_kernels": [
+          {
+            "kernel": "nvjet_sm90_tst_192x16_64x8_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 2.642,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::paged_attention_kernel<c10::BFloat16, c10::BFloat16>(c10::BFloat16 const*, c10::BFloat16 con",
+            "category": "attention",
+            "ms_per_step": 1.813,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_2x1_v_bz_splitK_TNT",
+            "category": "gemm",
+            "ms_per_step": 1.367,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_4x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.774,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x16_64x11_4x1_v_bz_splitK_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.512,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_384x16_64x4_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.438,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::rms_norm_kernel<c10::BFloat16, mini_vllm::Vector<c10::BFloat16> >(c10::BFloat16 const*, c10:",
+            "category": "norm",
+            "ms_per_step": 0.299,
+            "calls_per_step": 145.0
+          },
+          {
+            "kernel": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::T",
+            "category": "copy",
+            "ms_per_step": 0.251,
+            "calls_per_step": 108.0
+          },
+          {
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, __nv_bfloat16, float, __nv_bfloat16, false, float, __nv_bfloat16,",
+            "category": "gemm",
+            "ms_per_step": 0.132,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::rope_kernel<c10::BFloat16>(c10::BFloat16 const*, int const*, float const*, float const*, c10",
+            "category": "rope",
+            "ms_per_step": 0.127,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::paged_cache_update_kernel<c10::BFloat16>(int const*, c10::BFloat16 const*, c10::BFloat16*, i",
+            "category": "kv_write",
+            "ms_per_step": 0.11,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void at::native::vectorized_elementwise_kernel<8, at::native::CUDAFunctor_add<c10::BFloat16>, std::array<char*, 3ul>, fa",
+            "category": "elementwise",
+            "ms_per_step": 0.108,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::silu_and_mul_kernel<c10::BFloat16>(c10::BFloat16 const*, c10::BFloat16*, long, long)",
+            "category": "activation",
+            "ms_per_step": 0.076,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "void at::native::(anonymous namespace)::indexSelectSmallIndex<c10::BFloat16, int, unsigned int, 2, 2, -2>(at::cuda::deta",
+            "category": "copy",
+            "ms_per_step": 0.011,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<c10::BFloat16, at::native::ArgMaxOps<float>, unsigned int, l",
+            "category": "sampling",
+            "ms_per_step": 0.011,
+            "calls_per_step": 1.0
+          }
+        ]
+      },
+      "decode-256-in-flight": {
+        "workload": "profile-decode-256-in-flight",
+        "active_steps": 10,
+        "step_ms": 42.13893889999999,
+        "gpu_ms_per_step": 38.077939499999985,
+        "gpu_busy": 0.9036283421934953,
+        "kernels_per_step": 709.0,
+        "categories_ms_per_step": {
+          "attention": 29.087,
+          "gemm": 6.896,
+          "norm": 0.544,
+          "activation": 0.511,
+          "copy": 0.387,
+          "rope": 0.231,
+          "elementwise": 0.205,
+          "kv_write": 0.157,
+          "sampling": 0.059
+        },
+        "spans_ms_per_step": {
+          "schedule": 0.855,
+          "prepare": 1.108,
+          "forward": 1.459,
+          "sample": 37.983,
+          "spec.verify": 0.022,
+          "commit": 0.147
+        },
+        "top_kernels": [
+          {
+            "kernel": "void (anonymous namespace)::paged_attention_kernel<c10::BFloat16, c10::BFloat16>(c10::BFloat16 const*, c10::BFloat16 con",
+            "category": "attention",
+            "ms_per_step": 29.087,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_192x128_64x5_1x2_h_bz_coopB_TNT",
+            "category": "gemm",
+            "ms_per_step": 3.004,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x64_64x8_1x2_h_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 2.544,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_96x128_64x7_2x1_v_bz_TNN",
+            "category": "gemm",
+            "ms_per_step": 0.855,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::rms_norm_kernel<c10::BFloat16, mini_vllm::Vector<c10::BFloat16> >(c10::BFloat16 const*, c10:",
+            "category": "norm",
+            "ms_per_step": 0.544,
+            "calls_per_step": 145.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::silu_and_mul_kernel<c10::BFloat16>(c10::BFloat16 const*, c10::BFloat16*, long, long)",
+            "category": "activation",
+            "ms_per_step": 0.511,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_256x128_64x4_1x2_h_bz_coopA_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.493,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::T",
+            "category": "copy",
+            "ms_per_step": 0.307,
+            "calls_per_step": 108.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::rope_kernel<c10::BFloat16>(c10::BFloat16 const*, int const*, float const*, float const*, c10",
+            "category": "rope",
+            "ms_per_step": 0.231,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void at::native::vectorized_elementwise_kernel<8, at::native::CUDAFunctor_add<c10::BFloat16>, std::array<char*, 3ul>, fa",
+            "category": "elementwise",
+            "ms_per_step": 0.205,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void (anonymous namespace)::paged_cache_update_kernel<c10::BFloat16>(int const*, c10::BFloat16 const*, c10::BFloat16*, i",
+            "category": "kv_write",
+            "ms_per_step": 0.157,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<c10::BFloat16, at::native::ArgMaxOps<float>, unsigned int, l",
+            "category": "sampling",
+            "ms_per_step": 0.059,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "void at::native::vectorized_gather_kernel<16, long>(char*, char*, long*, int, long, long, long, long, bool)",
+            "category": "copy",
+            "ms_per_step": 0.055,
+            "calls_per_step": 2.0
+          },
+          {
+            "kernel": "Memcpy HtoD (Pageable -> Device)",
+            "category": "copy",
+            "ms_per_step": 0.007,
+            "calls_per_step": 8.0
+          },
+          {
+            "kernel": "Memcpy DtoD (Device -> Device)",
+            "category": "copy",
+            "ms_per_step": 0.006,
+            "calls_per_step": 5.0
+          }
+        ]
+      },
+      "mixed": {
+        "workload": "profile-mixed-16-in-flight",
+        "active_steps": 10,
+        "step_ms": 23.0389472,
+        "gpu_ms_per_step": 19.1257033,
+        "gpu_busy": 0.8301465832605408,
+        "kernels_per_step": 890.2,
+        "categories_ms_per_step": {
+          "attention": 9.459,
+          "gemm": 7.456,
+          "copy": 0.716,
+          "norm": 0.515,
+          "activation": 0.405,
+          "rope": 0.222,
+          "elementwise": 0.179,
+          "kv_write": 0.161,
+          "sampling": 0.011
+        },
+        "spans_ms_per_step": {
+          "schedule": 0.092,
+          "prepare": 0.456,
+          "forward": 10.329,
+          "sample": 11.823,
+          "spec.verify": 0.013,
+          "commit": 0.069
+        },
+        "top_kernels": [
+          {
+            "kernel": "(anonymous namespace)::flash_prefill_kernel(__nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloa",
+            "category": "attention",
+            "ms_per_step": 4.785,
+            "calls_per_step": 14.4
+          },
+          {
+            "kernel": "void (anonymous namespace)::paged_attention_kernel<c10::BFloat16, c10::BFloat16>(c10::BFloat16 const*, c10::BFloat16 con",
+            "category": "attention",
+            "ms_per_step": 4.675,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_192x16_64x8_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 1.585,
+            "calls_per_step": 21.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_2x1_v_bz_splitK_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.823,
+            "calls_per_step": 21.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_192x176_64x4_1x2_h_bz_coopB_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.818,
+            "calls_per_step": 7.2
+          },
+          {
+            "kernel": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::T",
+            "category": "copy",
+            "ms_per_step": 0.565,
+            "calls_per_step": 165.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_192x192_64x4_2x1_v_bz_coopB_TNN",
+            "category": "gemm",
+            "ms_per_step": 0.543,
+            "calls_per_step": 3.6
+          },
+          {
+            "kernel": "void (anonymous namespace)::rms_norm_kernel<c10::BFloat16, mini_vllm::Vector<c10::BFloat16> >(c10::BFloat16 const*, c10:",
+            "category": "norm",
+            "ms_per_step": 0.515,
+            "calls_per_step": 145.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_4x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.466,
+            "calls_per_step": 21.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_384x16_64x4_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.439,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x224_64x4_2x1_v_bz_coopA_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.431,
+            "calls_per_step": 3.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x176_64x5_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.425,
+            "calls_per_step": 7.2
+          },
+          {
+            "kernel": "void (anonymous namespace)::silu_and_mul_kernel<c10::BFloat16>(c10::BFloat16 const*, c10::BFloat16*, long, long)",
+            "category": "activation",
+            "ms_per_step": 0.405,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x144_64x6_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.356,
+            "calls_per_step": 7.2
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x112_64x7_1x2_h_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.325,
+            "calls_per_step": 7.2
+          }
+        ]
+      }
+    }
+  },
+  "mini-triton": {
+    "label": "mini-triton",
+    "engine": "mini-vllm",
+    "backend": "triton",
+    "tensor_parallel_size": 1,
+    "env": {
+      "device": "NVIDIA H100 80GB HBM3",
+      "capability": "9.0",
+      "memory_gb": 79.2,
+      "sms": 132,
+      "cpu": "unknown",
+      "cpus": 24,
+      "python_loop_ms": 50.6,
+      "driver": "610.57.04",
+      "max_sm_clock": "1980 MHz",
+      "max_mem_clock": "2619 MHz",
+      "power_limit": "700.00 W",
+      "peak_bandwidth": 3350000000000.0,
+      "torch": "2.14.1+cu130",
+      "cuda": "13.0",
+      "python": "3.12.10",
+      "triton": "3.8.0"
+    },
+    "load_s": 7.452675919,
+    "kv_blocks": 12288,
+    "geometry": {
+      "weight_bytes": 15136811008,
+      "kv_bytes_per_token": 147456
+    },
+    "engine_config": {
+      "model": "Qwen/Qwen3-8B",
+      "block_size": 16,
+      "num_blocks": 12288,
+      "max_num_seqs": 256,
+      "max_num_batched_tokens": 4096,
+      "max_model_len": 4096,
+      "prefix_caching": true
+    },
+    "workloads": [
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 4,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 1,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-1-in-flight",
+          "load": "1 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 4,
+          "wall_s": 14.703930681,
+          "output_tokens": 2048,
+          "output_tok_s": 139.28248469277452,
+          "total_tok_s": 174.10310586596816,
+          "requests_s": 0.27203610291557523,
+          "ttft_ms": {
+            "mean": 131.10736450000005,
+            "p50": 19.447911000000317,
+            "p90": 474.75418399999825,
+            "p99": 474.75418399999825,
+            "max": 474.75418399999825
+          },
+          "tpot_ms": {
+            "mean": 6.9371296844422705,
+            "p50": 6.93976618982388,
+            "p90": 6.9402773796477515,
+            "p99": 6.9402773796477515,
+            "max": 6.9402773796477515
+          },
+          "itl_ms": {
+            "mean": 6.9371296844422705,
+            "p50": 6.944839999999175,
+            "p90": 7.102480000000355,
+            "p99": 7.127827999998004,
+            "max": 7.468846999998391
+          }
+        },
+        "mbu_estimate": 0.6530537012039436,
+        "steps": {
+          "decode_steps": 2044,
+          "forward_mbu": {
+            "mean": 0.6793950548149725,
+            "p50": 0.6807586847615208,
+            "p90": 0.6956393687726796,
+            "p99": 0.6978775839874842,
+            "max": 0.6987616969908484
+          },
+          "step_mbu": {
+            "mean": 0.6521233212807306,
+            "p50": 0.6513604220202496,
+            "p90": 0.6671796797797885,
+            "p99": 0.6700536998363678,
+            "max": 0.6710884735554072
+          },
+          "step_ms": {
+            "mean": 6.93084827592955,
+            "p50": 6.937758999999488,
+            "p90": 7.096234000002255,
+            "p99": 7.121874999999278,
+            "max": 7.455231000001561
+          },
+          "forward_ms": {
+            "mean": 6.652696735704948,
+            "p50": 6.639552116394043,
+            "p90": 6.822656154632568,
+            "p99": 6.833183765411377,
+            "max": 6.915264129638672
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 32,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 16,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-16-in-flight",
+          "load": "16 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 32,
+          "wall_s": 7.900089471999998,
+          "output_tokens": 16384,
+          "output_tok_s": 2073.9005625277055,
+          "total_tok_s": 2592.375703159632,
+          "requests_s": 4.050587036186925,
+          "ttft_ms": {
+            "mean": 49.131949500001326,
+            "p50": 50.85243999999989,
+            "p90": 50.85243999999989,
+            "p99": 50.85243999999989,
+            "max": 50.85243999999989
+          },
+          "tpot_ms": {
+            "mean": 7.633874277886492,
+            "p50": 7.636805596868874,
+            "p90": 7.636805596868874,
+            "p99": 7.636805596868874,
+            "max": 7.636805596868874
+          },
+          "itl_ms": {
+            "mean": 7.633874277886491,
+            "p50": 7.643252999997685,
+            "p90": 7.886012000000164,
+            "p99": 7.915965999998775,
+            "max": 8.805551999998329
+          }
+        },
+        "mbu_estimate": 0.6265512541371157,
+        "steps": {
+          "decode_steps": 1022,
+          "forward_mbu": {
+            "mean": 0.6302810441985254,
+            "p50": 0.6289195667761528,
+            "p90": 0.6494059572452393,
+            "p99": 0.6525470025446434,
+            "max": 0.6531650125873552
+          },
+          "step_mbu": {
+            "mean": 0.5942339921425599,
+            "p50": 0.593102652238566,
+            "p90": 0.6144047586234694,
+            "p99": 0.6176590718502085,
+            "max": 0.6186148878717275
+          },
+          "step_ms": {
+            "mean": 7.618244732876857,
+            "p50": 7.624886999998637,
+            "p90": 7.870564000000968,
+            "p99": 7.900210999999047,
+            "max": 8.7687669999994
+          },
+          "forward_ms": {
+            "mean": 7.181724862343178,
+            "p50": 7.191808223724365,
+            "p90": 7.40723180770874,
+            "p99": 7.421631813049316,
+            "max": 7.428287982940674
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 128,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 64,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-64-in-flight",
+          "load": "64 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 128,
+          "wall_s": 10.530496972999998,
+          "output_tokens": 65536,
+          "output_tok_s": 6223.447969078108,
+          "total_tok_s": 7779.309961347634,
+          "requests_s": 12.15517181460568,
+          "ttft_ms": {
+            "mean": 205.75702683593698,
+            "p50": 99.24847100000278,
+            "p90": 513.1738529999978,
+            "p99": 513.1738529999978,
+            "max": 978.5955899999976
+          },
+          "tpot_ms": {
+            "mean": 9.888608115750364,
+            "p50": 9.504822027397264,
+            "p90": 10.842931285714284,
+            "p99": 10.842931285714284,
+            "max": 10.842931285714284
+          },
+          "itl_ms": {
+            "mean": 9.888608115750364,
+            "p50": 9.190830999997956,
+            "p90": 9.94664199999562,
+            "p99": 10.047210999999834,
+            "max": 465.4217369999998
+          }
+        },
+        "mbu_estimate": 0.6093253014718681,
+        "steps": {
+          "decode_steps": 1020,
+          "forward_mbu": {
+            "mean": 0.5633339589112287,
+            "p50": 0.5609196989627095,
+            "p90": 0.609900154438235,
+            "p99": 0.6158130005119629,
+            "max": 0.6314020580336844
+          },
+          "step_mbu": {
+            "mean": 0.5078672513923732,
+            "p50": 0.504282878634779,
+            "p90": 0.5556563658204443,
+            "p99": 0.5614495143422141,
+            "max": 0.5933018678660631
+          },
+          "step_ms": {
+            "mean": 9.114602334313679,
+            "p50": 9.147036000001663,
+            "p90": 9.900235000003477,
+            "p99": 10.003828000002102,
+            "max": 16.474328999997567
+          },
+          "forward_ms": {
+            "mean": 8.208438583916308,
+            "p50": 8.234335899353027,
+            "p90": 8.872159957885742,
+            "p99": 8.958847999572754,
+            "max": 8.975040435791016
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 512,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 256,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-256-in-flight",
+          "load": "256 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 512,
+          "wall_s": 18.506778867999998,
+          "output_tokens": 262144,
+          "output_tok_s": 14164.755621156322,
+          "total_tok_s": 17705.9445264454,
+          "requests_s": 27.665538322570942,
+          "ttft_ms": {
+            "mean": 329.28529224804726,
+            "p50": 217.3462890000053,
+            "p90": 779.5085200000003,
+            "p99": 918.4141169999975,
+            "max": 918.4141169999975
+          },
+          "tpot_ms": {
+            "mean": 17.407434205892248,
+            "p50": 17.628100469667316,
+            "p90": 17.72322047162427,
+            "p99": 17.86261766927593,
+            "max": 17.86261766927593
+          },
+          "itl_ms": {
+            "mean": 17.407434205892248,
+            "p50": 16.537392000003592,
+            "p90": 19.506178000000318,
+            "p99": 100.27205600000144,
+            "max": 111.6987509999916
+          }
+        },
+        "mbu_estimate": 0.5348769828947955,
+        "steps": {
+          "decode_steps": 1014,
+          "forward_mbu": {
+            "mean": 0.45174381371717737,
+            "p50": 0.4443917395906469,
+            "p90": 0.5443420970568341,
+            "p99": 0.5647251532974995,
+            "max": 0.5840599936452264
+          },
+          "step_mbu": {
+            "mean": 0.372279074382317,
+            "p50": 0.3650238876281653,
+            "p90": 0.4511634098242482,
+            "p99": 0.4673268474442991,
+            "max": 0.4793158157564016
+          },
+          "step_ms": {
+            "mean": 16.295171395463864,
+            "p50": 16.327052000001174,
+            "p90": 19.305204999994885,
+            "p99": 19.860140999995224,
+            "max": 23.539115000005495
+          },
+          "forward_ms": {
+            "mean": 13.420364673321064,
+            "p50": 13.414496421813965,
+            "p90": 15.904671669006348,
+            "p99": 16.367263793945312,
+            "max": 16.44476890563965
+          }
+        }
+      },
+      {
+        "workload": {
+          "kind": "prefill-heavy",
+          "num_requests": 32,
+          "input_len": 2048,
+          "output_len": 16,
+          "concurrency": 8,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "prefill-heavy-8-in-flight",
+          "load": "8 in flight",
+          "description": "2048 in, 16 out"
+        },
+        "summary": {
+          "requests": 32,
+          "wall_s": 3.0216024730000015,
+          "output_tokens": 512,
+          "output_tok_s": 169.4465120991446,
+          "total_tok_s": 21858.600060789653,
+          "requests_s": 10.590407006196537,
+          "ttft_ms": {
+            "mean": 326.18017934375,
+            "p50": 127.77998199999274,
+            "p90": 1108.6736649999978,
+            "p99": 1240.2269180000048,
+            "max": 1240.2269180000048
+          },
+          "tpot_ms": {
+            "mean": 28.28643006666679,
+            "p50": 28.9439066666669,
+            "p90": 32.87083040000027,
+            "p99": 51.73523326666706,
+            "max": 51.73523326666706
+          },
+          "itl_ms": {
+            "mean": 28.28643006666679,
+            "p50": 9.2150570000058,
+            "p90": 107.21044999999663,
+            "p99": 113.45620299999837,
+            "max": 433.6236329999963
+          }
+        },
+        "mbu_estimate": 0.5688991396149444,
+        "steps": {
+          "decode_steps": 47,
+          "forward_mbu": {
+            "mean": 0.527236528313033,
+            "p50": 0.5309194070003332,
+            "p90": 0.5340609607144662,
+            "p99": 0.5422230424814742,
+            "max": 0.5422230424814742
+          },
+          "step_mbu": {
+            "mean": 0.4932860956161609,
+            "p50": 0.49767774045431357,
+            "p90": 0.502849716866124,
+            "p99": 0.5044865632911135,
+            "max": 0.5044865632911135
+          },
+          "step_ms": {
+            "mean": 9.169780978723754,
+            "p50": 9.082254000006174,
+            "p90": 9.36587099999997,
+            "p99": 10.539677000011238,
+            "max": 10.539677000011238
+          },
+          "forward_ms": {
+            "mean": 8.575204727497507,
+            "p50": 8.51360034942627,
+            "p90": 8.721247673034668,
+            "p99": 9.056480407714844,
+            "max": 9.056480407714844
+          }
+        }
+      }
+    ],
+    "profiles": {
+      "decode-16-in-flight": {
+        "workload": "profile-decode-16-in-flight",
+        "active_steps": 10,
+        "step_ms": 8.246052599999999,
+        "gpu_ms_per_step": 6.950099599999999,
+        "gpu_busy": 0.8428395909092309,
+        "kernels_per_step": 637.0,
+        "categories_ms_per_step": {
+          "gemm": 5.881,
+          "attention": 0.314,
+          "norm": 0.293,
+          "copy": 0.211,
+          "rope": 0.117,
+          "activation": 0.067,
+          "kv_write": 0.055,
+          "sampling": 0.011
+        },
+        "spans_ms_per_step": {
+          "schedule": 0.06,
+          "prepare": 0.248,
+          "forward": 0.855,
+          "sample": 6.929,
+          "spec.verify": 0.01,
+          "commit": 0.018
+        },
+        "top_kernels": [
+          {
+            "kernel": "nvjet_sm90_tst_192x16_64x8_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 2.646,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_2x1_v_bz_splitK_TNT",
+            "category": "gemm",
+            "ms_per_step": 1.372,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_4x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.775,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x16_64x11_4x1_v_bz_splitK_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.513,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_384x16_64x4_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.441,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "paged_attention_kernel",
+            "category": "attention",
+            "ms_per_step": 0.314,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "rms_norm_kernel",
+            "category": "norm",
+            "ms_per_step": 0.293,
+            "calls_per_step": 145.0
+          },
+          {
+            "kernel": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::T",
+            "category": "copy",
+            "ms_per_step": 0.174,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, __nv_bfloat16, float, __nv_bfloat16, false, float, __nv_bfloat16,",
+            "category": "gemm",
+            "ms_per_step": 0.135,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "rope_kernel",
+            "category": "rope",
+            "ms_per_step": 0.117,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "silu_and_mul_kernel",
+            "category": "activation",
+            "ms_per_step": 0.067,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "store_kv_kernel",
+            "category": "kv_write",
+            "ms_per_step": 0.055,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "void at::native::(anonymous namespace)::indexSelectSmallIndex<c10::BFloat16, int, unsigned int, 2, 2, -2>(at::cuda::deta",
+            "category": "copy",
+            "ms_per_step": 0.012,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<c10::BFloat16, at::native::ArgMaxOps<float>, unsigned int, l",
+            "category": "sampling",
+            "ms_per_step": 0.011,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "Memcpy HtoD (Pageable -> Device)",
+            "category": "copy",
+            "ms_per_step": 0.006,
+            "calls_per_step": 8.0
+          }
+        ]
+      },
+      "decode-256-in-flight": {
+        "workload": "profile-decode-256-in-flight",
+        "active_steps": 10,
+        "step_ms": 13.715888000000001,
+        "gpu_ms_per_step": 10.729020100000001,
+        "gpu_busy": 0.7822329914038376,
+        "kernels_per_step": 565.0,
+        "categories_ms_per_step": {
+          "gemm": 6.935,
+          "attention": 2.279,
+          "norm": 0.57,
+          "rope": 0.307,
+          "copy": 0.307,
+          "activation": 0.203,
+          "kv_write": 0.071,
+          "sampling": 0.057
+        },
+        "spans_ms_per_step": {
+          "schedule": 0.806,
+          "prepare": 0.94,
+          "forward": 0.866,
+          "sample": 10.617,
+          "spec.verify": 0.017,
+          "commit": 0.115
+        },
+        "top_kernels": [
+          {
+            "kernel": "nvjet_sm90_tst_192x128_64x5_1x2_h_bz_coopB_TNT",
+            "category": "gemm",
+            "ms_per_step": 3.019,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x64_64x8_1x2_h_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 2.56,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "paged_attention_kernel",
+            "category": "attention",
+            "ms_per_step": 2.279,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_96x128_64x7_2x1_v_bz_TNN",
+            "category": "gemm",
+            "ms_per_step": 0.862,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "rms_norm_kernel",
+            "category": "norm",
+            "ms_per_step": 0.57,
+            "calls_per_step": 145.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_256x128_64x4_1x2_h_bz_coopA_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.494,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "rope_kernel",
+            "category": "rope",
+            "ms_per_step": 0.307,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::T",
+            "category": "copy",
+            "ms_per_step": 0.227,
+            "calls_per_step": 72.0
+          },
+          {
+            "kernel": "silu_and_mul_kernel",
+            "category": "activation",
+            "ms_per_step": 0.203,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "store_kv_kernel",
+            "category": "kv_write",
+            "ms_per_step": 0.071,
+            "calls_per_step": 36.0
+          },
+          {
+            "kernel": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<c10::BFloat16, at::native::ArgMaxOps<float>, unsigned int, l",
+            "category": "sampling",
+            "ms_per_step": 0.057,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "void at::native::vectorized_gather_kernel<16, long>(char*, char*, long*, int, long, long, long, long, bool)",
+            "category": "copy",
+            "ms_per_step": 0.055,
+            "calls_per_step": 2.0
+          },
+          {
+            "kernel": "Memcpy HtoD (Pageable -> Device)",
+            "category": "copy",
+            "ms_per_step": 0.007,
+            "calls_per_step": 8.0
+          },
+          {
+            "kernel": "Memcpy DtoD (Device -> Device)",
+            "category": "copy",
+            "ms_per_step": 0.006,
+            "calls_per_step": 5.0
+          },
+          {
+            "kernel": "void at::native::vectorized_gather_kernel<16, int>(char*, char*, int*, int, long, long, long, long, bool)",
+            "category": "copy",
+            "ms_per_step": 0.003,
+            "calls_per_step": 1.0
+          }
+        ]
+      },
+      "mixed": {
+        "workload": "profile-mixed-16-in-flight",
+        "active_steps": 10,
+        "step_ms": 15.328769,
+        "gpu_ms_per_step": 10.268440099999998,
+        "gpu_busy": 0.6698802819717616,
+        "kernels_per_step": 631.0,
+        "categories_ms_per_step": {
+          "gemm": 7.492,
+          "attention": 1.452,
+          "norm": 0.525,
+          "rope": 0.278,
+          "copy": 0.263,
+          "activation": 0.181,
+          "kv_write": 0.066,
+          "sampling": 0.012
+        },
+        "spans_ms_per_step": {
+          "schedule": 0.071,
+          "prepare": 0.395,
+          "forward": 9.783,
+          "sample": 4.874,
+          "spec.verify": 0.01,
+          "commit": 0.047
+        },
+        "top_kernels": [
+          {
+            "kernel": "nvjet_sm90_tst_192x16_64x8_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 1.588,
+            "calls_per_step": 21.6
+          },
+          {
+            "kernel": "paged_attention_kernel",
+            "category": "attention",
+            "ms_per_step": 1.452,
+            "calls_per_step": 50.4
+          },
+          {
+            "kernel": "nvjet_sm90_tst_192x176_64x4_1x2_h_bz_coopB_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.83,
+            "calls_per_step": 7.2
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_2x1_v_bz_splitK_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.826,
+            "calls_per_step": 21.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_192x192_64x4_2x1_v_bz_coopB_TNN",
+            "category": "gemm",
+            "ms_per_step": 0.55,
+            "calls_per_step": 3.6
+          },
+          {
+            "kernel": "rms_norm_kernel",
+            "category": "norm",
+            "ms_per_step": 0.525,
+            "calls_per_step": 145.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_64x16_64x16_4x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.467,
+            "calls_per_step": 21.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_384x16_64x4_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.444,
+            "calls_per_step": 1.0
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x224_64x4_2x1_v_bz_coopA_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.442,
+            "calls_per_step": 3.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x176_64x5_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.429,
+            "calls_per_step": 7.2
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x144_64x6_2x1_v_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.361,
+            "calls_per_step": 7.2
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x112_64x7_1x2_h_bz_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.307,
+            "calls_per_step": 7.2
+          },
+          {
+            "kernel": "nvjet_sm90_tst_128x16_64x11_4x1_v_bz_splitK_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.305,
+            "calls_per_step": 21.6
+          },
+          {
+            "kernel": "nvjet_sm90_tst_192x176_64x4_2x1_v_bz_coopB_TNT",
+            "category": "gemm",
+            "ms_per_step": 0.285,
+            "calls_per_step": 3.6
+          },
+          {
+            "kernel": "rope_kernel",
+            "category": "rope",
+            "ms_per_step": 0.278,
+            "calls_per_step": 72.0
+          }
+        ]
+      }
+    }
+  },
+  "vllm": {
+    "label": "vllm",
+    "engine": "vllm",
+    "vllm_version": "0.31.0",
+    "enforce_eager": false,
+    "env": {
+      "device": "NVIDIA H100 80GB HBM3",
+      "capability": "9.0",
+      "memory_gb": 79.2,
+      "sms": 132,
+      "cpu": "unknown",
+      "cpus": 24,
+      "python_loop_ms": 50.5,
+      "driver": "610.57.04",
+      "max_sm_clock": "1980 MHz",
+      "max_mem_clock": "2619 MHz",
+      "power_limit": "700.00 W",
+      "peak_bandwidth": 3350000000000.0,
+      "torch": "2.13.0+cu130",
+      "cuda": "13.0",
+      "python": "3.12.10",
+      "triton": "3.7.1"
+    },
+    "load_s": 95.314468582,
+    "kv_blocks": 12288,
+    "geometry": {
+      "weight_bytes": 15136811008,
+      "kv_bytes_per_token": 147456
+    },
+    "engine_config": {
+      "model": "Qwen/Qwen3-8B",
+      "block_size": 16,
+      "num_blocks": 12288,
+      "max_num_seqs": 256,
+      "max_num_batched_tokens": 4096,
+      "max_model_len": 4096,
+      "prefix_caching": true
+    },
+    "workloads": [
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 4,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 1,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-1-in-flight",
+          "load": "1 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 4,
+          "wall_s": 13.763104396999992,
+          "output_tokens": 2048,
+          "output_tok_s": 148.80363767686106,
+          "total_tok_s": 186.00454709607632,
+          "requests_s": 0.29063210483761925,
+          "ttft_ms": {
+            "mean": 10.651753249998563,
+            "p50": 10.596457999994868,
+            "p90": 11.222199999991744,
+            "p99": 11.222199999991744,
+            "max": 11.222199999991744
+          },
+          "tpot_ms": {
+            "mean": 6.712568454011745,
+            "p50": 6.713530152641875,
+            "p90": 6.714876577299427,
+            "p99": 6.714876577299427,
+            "max": 6.714876577299427
+          },
+          "itl_ms": {
+            "mean": 6.712568454011745,
+            "p50": 6.706029999989482,
+            "p90": 6.870019999993815,
+            "p99": 7.038428999990742,
+            "max": 7.398965999996676
+          }
+        },
+        "mbu_estimate": 0.6763097490282284,
+        "steps": null
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 32,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 16,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-16-in-flight",
+          "load": "16 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 32,
+          "wall_s": 7.382400992000001,
+          "output_tokens": 16384,
+          "output_tok_s": 2219.3321681868347,
+          "total_tok_s": 2774.1652102335433,
+          "requests_s": 4.3346331409899115,
+          "ttft_ms": {
+            "mean": 55.16971909375145,
+            "p50": 55.66359000000887,
+            "p90": 58.500795000000494,
+            "p99": 58.500795000000494,
+            "max": 58.500795000000494
+          },
+          "tpot_ms": {
+            "mean": 7.115031901846864,
+            "p50": 7.115652140900187,
+            "p90": 7.115652140900187,
+            "p99": 7.154644225048902,
+            "max": 7.154644225048902
+          },
+          "itl_ms": {
+            "mean": 7.115031901846864,
+            "p50": 7.103125999989857,
+            "p90": 7.364108999993846,
+            "p99": 7.552673999995818,
+            "max": 27.815412999999012
+          }
+        },
+        "mbu_estimate": 0.6741946789121662,
+        "steps": null
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 128,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 64,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-64-in-flight",
+          "load": "64 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 128,
+          "wall_s": 9.013315062999993,
+          "output_tokens": 65536,
+          "output_tok_s": 7271.020655766025,
+          "total_tok_s": 9088.77581970753,
+          "requests_s": 14.201212218293017,
+          "ttft_ms": {
+            "mean": 172.07786447656594,
+            "p50": 184.5469410000078,
+            "p90": 207.6778939999997,
+            "p99": 207.6778939999997,
+            "max": 207.6778939999997
+          },
+          "tpot_ms": {
+            "mean": 8.478646867401544,
+            "p50": 8.444964285714311,
+            "p90": 8.593493268101756,
+            "p99": 8.703832659491232,
+            "max": 8.703832659491232
+          },
+          "itl_ms": {
+            "mean": 8.478646867401544,
+            "p50": 8.430879000002278,
+            "p90": 9.080500999999686,
+            "p99": 9.502435000001697,
+            "max": 96.05700100000547
+          }
+        },
+        "mbu_estimate": 0.6642493469363316,
+        "steps": null
+      },
+      {
+        "workload": {
+          "kind": "decode-heavy",
+          "num_requests": 512,
+          "input_len": 128,
+          "output_len": 512,
+          "concurrency": 256,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "decode-heavy-256-in-flight",
+          "load": "256 in flight",
+          "description": "128 in, 512 out"
+        },
+        "summary": {
+          "requests": 512,
+          "wall_s": 16.077555460000013,
+          "output_tokens": 262144,
+          "output_tok_s": 16304.966302383371,
+          "total_tok_s": 20381.207877979214,
+          "requests_s": 31.84563730934252,
+          "ttft_ms": {
+            "mean": 389.0257456132828,
+            "p50": 311.7761120000182,
+            "p90": 705.797605000015,
+            "p99": 831.3729319999936,
+            "max": 831.3729319999936
+          },
+          "tpot_ms": {
+            "mean": 14.932097967844149,
+            "p50": 15.005033430528394,
+            "p90": 15.292605457925678,
+            "p99": 15.48372990998041,
+            "max": 15.59703650489237
+          },
+          "itl_ms": {
+            "mean": 14.932097967844149,
+            "p50": 14.159737999989375,
+            "p90": 16.542118000018036,
+            "p99": 35.432802999991964,
+            "max": 308.4859490000156
+          }
+        },
+        "mbu_estimate": 0.624691667170472,
+        "steps": null
+      },
+      {
+        "workload": {
+          "kind": "prefill-heavy",
+          "num_requests": 32,
+          "input_len": 2048,
+          "output_len": 16,
+          "concurrency": 8,
+          "rate": 0.0,
+          "lognormal": false,
+          "shared_prefix": 0,
+          "seed": 0,
+          "name": "prefill-heavy-8-in-flight",
+          "load": "8 in flight",
+          "description": "2048 in, 16 out"
+        },
+        "summary": {
+          "requests": 32,
+          "wall_s": 1.9685494379999966,
+          "output_tokens": 512,
+          "output_tok_s": 260.089988148929,
+          "total_tok_s": 33551.608471211846,
+          "requests_s": 16.255624259308064,
+          "ttft_ms": {
+            "mean": 215.9564870312538,
+            "p50": 241.66778299999692,
+            "p90": 337.8084430000001,
+            "p99": 388.6833840000179,
+            "max": 388.6833840000179
+          },
+          "tpot_ms": {
+            "mean": 18.087845049999984,
+            "p50": 16.360685733332048,
+            "p90": 27.871444866667616,
+            "p99": 28.314388333332847,
+            "max": 28.314388333332847
+          },
+          "itl_ms": {
+            "mean": 18.087845049999984,
+            "p50": 7.890129999992723,
+            "p90": 49.8371870000085,
+            "p99": 98.09450800000263,
+            "max": 99.17393200001356
+          }
+        },
+        "mbu_estimate": 0.6644298634890433,
+        "steps": null
+      }
+    ]
+  }
+}
