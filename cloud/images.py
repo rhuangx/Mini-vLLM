@@ -36,7 +36,6 @@ def mini_image(cuda_archs: str = "90a") -> modal.Image:
         .add_local_file(REPO / "pyproject.toml", f"{REMOTE}/pyproject.toml")
         .add_local_dir(REPO / "src" / "mini_vllm", f"{REMOTE}/src/mini_vllm", ignore=_PYCACHE)
         .add_local_dir(REPO / "tests", f"{REMOTE}/tests", ignore=_PYCACHE)
-        .add_local_dir(REPO / "benches", f"{REMOTE}/benches", ignore=_PYCACHE)
         .add_local_python_source("cloud")
     )
 
