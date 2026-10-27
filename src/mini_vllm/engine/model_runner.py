@@ -262,6 +262,7 @@ class ModelRunner:
             print(f"CUDA graph capture failed, running eagerly: {error!r}")
             self.graphs = {}
 
+    @torch.inference_mode()
     def run(self, batch: ForwardBatch, rows: torch.Tensor | None = None) -> torch.Tensor | None:
         """Logits for one step: replayed from a graph when every sequence decodes one token and
         a graph is large enough, otherwise eagerly. With tensor parallelism, rank 0 first sends
@@ -283,8 +284,7 @@ class ModelRunner:
             b.tables[:bs, : batch.block_tables.shape[1]].copy_(batch.block_tables)
             self.graphs[size].replay()
             self.stats.graph_steps += 1
-            with torch.inference_mode():
-                return self.model.compute_logits(self.hidden[:bs], rows)
+            return self.model.compute_logits(self.hidden[:bs], rows)
         self.stats.eager_steps += 1
         return run_batch(self.model, self.kv, batch, rows)
 
